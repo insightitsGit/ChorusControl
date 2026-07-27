@@ -60,6 +60,13 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 | Air-gapped customers can’t phone home | Offline license verify; online check is optional |
 | “Who is serving Cortex for tenant X?” | Fleet `memory_endpoint` + `/cortex` console |
 
+### Customer path (after pip)
+
+1. Buy **Enterprise** (CONTROL) → paste `CHORUSCONTROL_LICENSE_KEY`.  
+2. `pip install "choruscontrol[server,agent]==0.1.0"`  
+3. `choruscontrol serve` → **mother = dashboard + API** at `/overview` (you host it; we do not).  
+4. Optional: `choruscontrol-agent` on workers with a join token from Admin.
+
 ---
 
 ## How enterprise licensing works
