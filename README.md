@@ -59,6 +59,59 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 
 ---
 
+## How enterprise licensing works
+
+ChorusControl is **self-hosted software**. Insight IT Solutions sells the **commercial license**; you run the mother + agents in **your** VPC. Billing never lives inside the customer container.
+
+```
+  ┌─────────────────────────────┐         ┌──────────────────────────────────┐
+  │  Side 1 — insightits.com    │         │  Side 2 — your VPC               │
+  │  Account · Stripe · support │  JWT    │  Mother + fleet agents           │
+  │  Issues signed license key  │ ──────► │  Verifies offline (Ed25519)      │
+  │  Optional /validate (~14d)  │ ◄─opt─  │  Paste key in Admin → License    │
+  └─────────────────────────────┘         └──────────────────────────────────┘
+```
+
+### What you buy from us
+
+1. Create / sign in at **[www.insightits.com](https://www.insightits.com)** (customer portal).  
+2. Choose a **ChorusControl** plan (Stripe checkout for Starter / Enterprise; Sovereign via sales).  
+3. Copy or download the **license JWT** from the portal (or email delivery).  
+4. Install ChorusControl in your environment (`DEMO_MODE=0`).  
+5. Paste the key into **Admin → License** or set `CHORUSCONTROL_LICENSE_KEY`.  
+6. Mother verifies the signature **offline** — air-gap friendly. Connected installs may optionally call Side 1 about every **14 days** only to pick up **revocation** (not required to boot).
+
+**You do not** put Stripe keys, private signing keys, or the company website inside your ChorusControl image.
+
+### Plans & list pricing
+
+Commercial tiers are defined on Side 1 (keep in sync with portal checkout). List prices:
+
+| Tier | List price | Max nodes | Max tenants | Included product features (Side 2 flags) |
+|------|------------|-----------|-------------|------------------------------------------|
+| **Starter** | **$499/mo** | 4 | 5 | Core UI, sleep, basic taxonomy |
+| **Enterprise** | **$2,499/mo** | 16 | 50 | + `trace.replay`, `guard.shadow`, `audit.export` |
+| **Sovereign** | **Custom** | 64 | 200 | Enterprise features + air-gap / commercial SLA (sales-issued) |
+
+- License JWT `exp` is typically **~90 days** (or through the Stripe period); renewals re-issue a new key.  
+- After `exp`, Side 2 enters **14-day read-only grace** (observe OK; mutations blocked), then fail-closed.  
+- **Sovereign** is not self-serve checkout — contact sales / Agile Super Admin issuance.  
+- Prices above are **list labels** from the Side 1 catalog; quotes, discounts, and multi-year deals are commercial — see the portal or sales.
+
+Portal / support: [www.insightits.com](https://www.insightits.com) · support deep-link configurable via `INSIGHTITS_SUPPORT_URL`.  
+Contract detail: [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com-Handoff.md).
+
+### Demo vs paid
+
+| Mode | Who | What you get |
+|------|-----|--------------|
+| **`DEMO_MODE=1`** | Local eval / healthcare compose | Auto demo JWT, NullAdapters OK, labeled `demo` |
+| **`DEMO_MODE=0` + company JWT** | Paying / pilot customer | Enforced tier, nodes, tenants, features; fail-closed without a valid key |
+
+Open-source install without a key is for **evaluation with demo mode** only — production enterprise use requires a license from Insight ITS.
+
+---
+
 ## Quick start (30 seconds)
 
 ### 1) Install
@@ -228,10 +281,17 @@ choruscontrol-keygen   # local/dev issuance helpers only — production keys are
 
 ---
 
-## Side 1 (website)
+## Side 1 (commercial portal)
 
-Billing, Stripe, and license **issuance** are **not** in this repo.  
-Contract: [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com-Handoff.md).
+| Concern | Where |
+|---------|--------|
+| Buy / renew / upgrade | [www.insightits.com](https://www.insightits.com) |
+| Stripe billing | Side 1 only |
+| License **issuance** (Ed25519 private key) | Side 1 only |
+| License **verification** | This repo (Side 2) |
+| Support tickets | Side 1 support URL |
+
+Handoff contract: [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com-Handoff.md).
 
 ---
 
