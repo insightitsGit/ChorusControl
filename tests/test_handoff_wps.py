@@ -281,7 +281,7 @@ async def test_wp7_fleet_live_ws(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_wp8_commands(tmp_path, monkeypatch):
-    from choruscontrol.agent.runtime import AgentRuntime, SUPPORTED_COMMANDS
+    from choruscontrol.agent.runtime import SUPPORTED_COMMANDS
 
     assert "REQUEST_METRICS" in SUPPORTED_COMMANDS
     assert "DRAIN" in SUPPORTED_COMMANDS

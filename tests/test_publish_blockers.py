@@ -92,7 +92,6 @@ async def test_bug004_fleet_ack_ledger_require_session(tmp_path, monkeypatch):
     from choruscontrol.server import create_app
 
     app = create_app()
-    h = {"Authorization": "Bearer dev-admin-token"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         async with app.router.lifespan_context(app):
             s = app.state.cc

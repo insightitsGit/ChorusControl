@@ -10,31 +10,74 @@ ChorusControl ships as **one PyPI package** with extras so mother and workers st
 | `[agent]` | Lightweight fleet agent (`choruscontrol-agent`) |
 | `[server]` | Mother UI/API |
 | `[postgres]` | `asyncpg` for audit dual-write |
+| `[prism]` | Live Prism pack pins (ChorusGraph, Guard, Shine, RAG, Cortex) |
 | `[fabric]` | Optional Fabric transport |
-| `[all]` | server + agent + postgres |
-| `[dev]` | tests / lint |
+| `[all]` | server + agent + postgres + prism |
+| `[dev]` | tests / lint (+ server, agent, prism) |
+| `[packaging]` | `build` + `twine` |
 
 ## Local / CI build
 
 ```bash
 pip install build twine
 python -m build
+twine check dist/*
+python scripts/inspect_wheel.py
 # artifacts: dist/choruscontrol-*.whl dist/choruscontrol-*.tar.gz
 ```
 
 PowerShell: `pwsh scripts/build_release.ps1`
 
-## Publish (manual)
+## Publish checklist (v0.1.0)
+
+### Preflight (done in repo)
+
+- [x] Version `0.1.0` in `pyproject.toml`
+- [x] Apache-2.0 `LICENSE` + project classifiers
+- [x] Wheel includes UI static/templates + `side1_public.pem` / `.hex`
+- [x] `twine check` passes
+- [x] CI on `main` (`.github/workflows/ci.yml`) + tag publish (`.github/workflows/publish.yml`)
+- [x] Name `choruscontrol` available on PyPI (404 as of prep)
+
+### One-time: Trusted Publisher on PyPI
+
+1. Sign in at [pypi.org](https://pypi.org) as the Insight ITS publisher account.
+2. **Publishing → Add a new pending publisher** (or create project `choruscontrol` first).
+3. Set:
+   - **PyPI project name:** `choruscontrol`
+   - **Owner:** `insightitsGit`
+   - **Repository:** `ChorusControl`
+   - **Workflow name:** `publish.yml`
+   - **Environment name:** leave empty (unless you add a matching GitHub Environment)
+4. Save. First tag upload creates the project via OIDC — no long-lived API token required.
+
+Optional TestPyPI: same form on [test.pypi.org](https://test.pypi.org), then tag a dry-run or use manual `twine upload --repository testpypi dist/*`.
+
+### Release command (after Trusted Publisher is saved)
 
 ```bash
-# TestPyPI
-twine upload --repository testpypi dist/*
-
-# PyPI (requires API token)
-twine upload dist/*
+# on main, clean tree
+git pull
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-GitHub Actions: `.github/workflows/publish.yml` (publish on tag `v*`).
+GitHub Actions: **Publish** workflow → test → build → `pypa/gh-action-pypi-publish`.
+
+Verify:
+
+```bash
+pip install "choruscontrol[server,agent]==0.1.0"
+choruscontrol doctor --mode mother
+```
+
+### Manual fallback (API token)
+
+```bash
+twine upload dist/*          # or --repository testpypi
+```
+
+Prefer Trusted Publisher over long-lived tokens.
 
 ## Container worker (lightweight)
 
@@ -45,18 +88,12 @@ ENV CHORUSCONTROL_MOTHER_URL=http://mother:8443
 CMD ["choruscontrol-agent"]
 ```
 
-Until the package is on public PyPI, install from GitHub:
+Until the first PyPI release is live, install from GitHub:
 
 ```bash
 pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
 # or from a clone:
 pip install ".[agent]"
-```
-
-or install a wheel from your private index:
-
-```bash
-pip install "choruscontrol[agent]==0.1.0" --index-url https://pypi.company.internal/simple
 ```
 
 ## Mother with Postgres audit

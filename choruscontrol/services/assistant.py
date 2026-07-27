@@ -313,8 +313,8 @@ def explain_overview(snap: dict[str, Any]) -> str:
             or "none enrolled yet"
         )
         + ".\n\n"
-        f"Ask about a number ('why is reliability 0?') or an agent "
-        f"('what does the clinical agent do?', 'explain GREEN vs ORANGE')."
+        "Ask about a number ('why is reliability 0?') or an agent "
+        "('what does the clinical agent do?', 'explain GREEN vs ORANGE')."
     )
 
 

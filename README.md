@@ -9,8 +9,11 @@
 Govern, observe, and correct production AI fleets without putting Side 1 (billing) or phone-home inside the customer VPC.
 
 ```bash
-# Until the first PyPI tag, install from GitHub:
-pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
+# After v0.1.0 is on PyPI:
+pip install "choruscontrol[server,agent]==0.1.0"
+
+# Until then (or for tip-of-main):
+# pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
 
 set CHORUSCONTROL_DEMO_MODE=1
 set CHORUSCONTROL_ADMIN_TOKEN=healthcare-demo-token
@@ -117,13 +120,12 @@ Open-source install without a key is for **evaluation with demo mode** only — 
 ### 1) Install
 
 ```bash
-# GitHub (current)
-pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
+pip install "choruscontrol[server,agent]==0.1.0"
 
-# After v0.1.0 is on PyPI:
-# pip install "choruscontrol[server,agent]==0.1.0"
+# Tip of main (pre-release / hotfix):
+# pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
 
-# Live Prism packs (private index / pins as needed):
+# Live Prism packs (public pins when available):
 # pip install "choruscontrol[server,agent,prism]"
 ```
 
@@ -319,13 +321,13 @@ Includes hot-path latency (S03), restart soak, publish-blocker regressions (lice
 
 ## Publish (maintainers)
 
+Full checklist: [doc/PACKAGING.md](doc/PACKAGING.md) (Trusted Publisher + tag `v0.1.0`).
+
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
-# GitHub Actions: test → build → PyPI (Trusted Publisher)
+# GitHub Actions Publish: test → build → PyPI
 ```
-
-Manual: `python -m build` then `twine upload dist/*` (prefer TestPyPI first).
 
 ---
 

@@ -9,7 +9,7 @@ import pytest
 
 from choruscontrol.config import Settings
 from choruscontrol.license.online import apply_online_to_status, due_for_check, run_online_check
-from choruscontrol.license.verifier import LicenseClaims, LicenseStatus, LicenseVerifier
+from choruscontrol.license.verifier import LicenseClaims, LicenseStatus
 
 
 def test_due_for_check_respects_interval_and_airgap(tmp_path):

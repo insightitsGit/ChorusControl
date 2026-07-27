@@ -5,7 +5,7 @@ from __future__ import annotations
 import statistics
 import time
 
-from choruscontrol.agent.runtime import AgentRuntime, invoke_passthrough
+from choruscontrol.agent.runtime import invoke_passthrough
 
 
 def _fake_invoke(x: int) -> int:

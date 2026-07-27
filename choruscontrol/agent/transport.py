@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """HTTP primary transport (R01). Fabric is optional secondary."""
+
+from __future__ import annotations
 
 from typing import Any
 

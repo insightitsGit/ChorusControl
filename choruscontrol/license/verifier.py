@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 import jwt
 from cryptography.hazmat.primitives import serialization
