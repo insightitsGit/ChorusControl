@@ -6,8 +6,9 @@ Set these for non-demo mother (fail-closed):
 CHORUSCONTROL_DEMO_MODE=0
 CHORUSCONTROL_ADMIN_TOKEN=<strong random ≥16 chars>
 CHORUSCONTROL_LICENSE_KEY=<Side 1 issued JWT>
-CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX=<Side 1 ceremony --public>
-# optional PEM alternative:
+# Optional on choruscontrol>=0.1.1 — packaged side1_public.hex is the 2026-07-27 ceremony public.
+# Set only for key rotation / emergency override:
+# CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX=<Side 1 ceremony --public>
 # CHORUSCONTROL_LICENSE_PUBLIC_PEM="-----BEGIN PUBLIC KEY-----..."
 
 CHORUSCONTROL_AUDIT_PRIVATE_KEY_PEM=<or let mother generate once on volume>

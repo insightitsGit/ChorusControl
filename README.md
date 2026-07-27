@@ -2,15 +2,15 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-informational)](https://github.com/insightitsGit/ChorusControl)
+[![Version](https://img.shields.io/badge/version-0.1.1-informational)](https://github.com/insightitsGit/ChorusControl)
 [![CI](https://img.shields.io/badge/tests-51%20passing-brightgreen)](https://github.com/insightitsGit/ChorusControl)
 
 **AI Operations Platform for the Prism / Chorus stack — mother control plane + lightweight fleet agents.**  
 Govern, observe, and correct production AI fleets without putting Side 1 (billing) or phone-home inside the customer VPC.
 
 ```bash
-# After v0.1.0 is on PyPI:
-pip install "choruscontrol[server,agent]==0.1.0"
+# After v0.1.1 is on PyPI:
+pip install "choruscontrol[server,agent]==0.1.1"
 
 # Until then (or for tip-of-main):
 # pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
@@ -63,7 +63,7 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 ### Customer path (after pip)
 
 1. Buy **Enterprise** (CONTROL) → paste `CHORUSCONTROL_LICENSE_KEY`.  
-2. `pip install "choruscontrol[server,agent]==0.1.0"`  
+2. `pip install "choruscontrol[server,agent]==0.1.1"`  
 3. `choruscontrol serve` → **mother = dashboard + API** at `/overview` (you host it; we do not).  
 4. Optional: `choruscontrol-agent` on workers with a join token from Admin.
 
@@ -127,7 +127,7 @@ Open-source install without a key is for **evaluation with demo mode** only — 
 ### 1) Install
 
 ```bash
-pip install "choruscontrol[server,agent]==0.1.0"
+pip install "choruscontrol[server,agent]==0.1.1"
 
 # Tip of main (pre-release / hotfix):
 # pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
@@ -258,7 +258,7 @@ Packaging detail: [doc/PACKAGING.md](doc/PACKAGING.md).
 1. **`CHORUSCONTROL_DEMO_MODE=0`** — never ship demo NullAdapters unlabeled.  
 2. **Strong `CHORUSCONTROL_ADMIN_TOKEN`** (≥16 chars; `serve` refuses weak defaults).  
 3. **Side 1 JWT** in `CHORUSCONTROL_LICENSE_KEY`.  
-4. **Trust anchor** — `CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX` from Side 1 ceremony `--public` (packaged PEM is a placeholder until you pin the live key).  
+4. **Trust anchor** — packaged `side1_public.hex` is the **prod ceremony public** (2026-07-27). Override with `CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX` only for key rotation.  
 5. Optional: `DATABASE_URL` for Postgres durability; `CHORUSCONTROL_LICENSE_ONLINE_CHECK=1` for revoke polling.  
 
 Full env list: [doc/Azure-Mother-Env.md](doc/Azure-Mother-Env.md).
@@ -328,11 +328,11 @@ Includes hot-path latency (S03), restart soak, publish-blocker regressions (lice
 
 ## Publish (maintainers)
 
-Full checklist: [doc/PACKAGING.md](doc/PACKAGING.md) (Trusted Publisher + tag `v0.1.0`).
+Full checklist: [doc/PACKAGING.md](doc/PACKAGING.md) (Trusted Publisher + tag `v0.1.1`).
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 # GitHub Actions Publish: test → build → PyPI
 ```
 

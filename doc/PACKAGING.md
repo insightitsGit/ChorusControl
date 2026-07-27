@@ -28,16 +28,16 @@ python scripts/inspect_wheel.py
 
 PowerShell: `pwsh scripts/build_release.ps1`
 
-## Publish checklist (v0.1.0)
+## Publish checklist (v0.1.1)
 
-### Preflight (done in repo)
+### Preflight
 
-- [x] Version `0.1.0` in `pyproject.toml`
+- [x] Version `0.1.1` in `pyproject.toml`
+- [x] Packaged `side1_public.hex` = prod ceremony public (BUG-007)
 - [x] Apache-2.0 `LICENSE` + project classifiers
 - [x] Wheel includes UI static/templates + `side1_public.pem` / `.hex`
 - [x] `twine check` passes
 - [x] CI on `main` (`.github/workflows/ci.yml`) + tag publish (`.github/workflows/publish.yml`)
-- [x] Name `choruscontrol` available on PyPI (404 as of prep)
 
 ### One-time: Trusted Publisher on PyPI
 
@@ -58,17 +58,24 @@ Optional TestPyPI: same form on [test.pypi.org](https://test.pypi.org), then tag
 ```bash
 # on main, clean tree
 git pull
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 GitHub Actions: **Publish** workflow → test → build → `pypa/gh-action-pypi-publish`.
 
+Or local:
+
+```bash
+python -m build && twine check dist/* && twine upload dist/*
+```
+
 Verify:
 
 ```bash
-pip install "choruscontrol[server,agent]==0.1.0"
+pip install "choruscontrol[server,agent]==0.1.1"
 choruscontrol doctor --mode mother
+# Ceremony JWT verifies without CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX
 ```
 
 ### Manual fallback (API token)
@@ -83,7 +90,7 @@ Prefer Trusted Publisher over long-lived tokens.
 
 ```dockerfile
 FROM python:3.12-slim
-RUN pip install --no-cache-dir "choruscontrol[agent]==0.1.0"
+RUN pip install --no-cache-dir "choruscontrol[agent]==0.1.1"
 ENV CHORUSCONTROL_MOTHER_URL=http://mother:8443
 CMD ["choruscontrol-agent"]
 ```

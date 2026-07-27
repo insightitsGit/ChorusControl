@@ -1,14 +1,13 @@
-"""License trust anchor resolution (BUG-001).
+"""License trust anchor resolution (BUG-001 / BUG-007).
 
 Load order (non-demo):
 1. CHORUSCONTROL_LICENSE_PUBLIC_PEM (full PEM text)
 2. CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX (32-byte raw Ed25519 public hex from Side 1 ceremony)
-3. Packaged ``side1_public.pem`` (pinned trust anchor shipped with Side 2)
+3. Packaged ``side1_public.pem`` / ``side1_public.hex`` (prod ceremony public, pinned in release)
 
 Demo / tests may still use ephemeral DEV keys via LicenseVerifier(public_pem=DEV...).
-Production Azure must set Side 1 ceremony public hex/PEM so issued JWTs verify.
-The packaged PEM is a stable Insight ITS trust-anchor placeholder until ceremony
-replaces it in release artifacts / env.
+Customers on ``choruscontrol>=0.1.1`` verify ceremony-issued JWTs with the packaged
+key — no ``CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX`` override required.
 """
 
 from __future__ import annotations
