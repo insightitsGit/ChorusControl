@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import time
@@ -22,7 +23,14 @@ from choruscontrol.services.graph import (
     recommendations,
     sync_from_fleet,
 )
-from choruscontrol.services.incidents import create_incident, get_incident, list_incidents, link_cascade_incident
+from choruscontrol.services.incidents import (
+    create_incident,
+    get_incident,
+    incident_intelligence,
+    list_incidents,
+    link_cascade_incident,
+    update_incident_state,
+)
 from choruscontrol.services.pipelines import live_pipelines
 from choruscontrol.services.policy import PolicyValidationError, shadow_promote_checklist, validate_guard_policy
 from choruscontrol.services.tenants import create_tenant, delete_tenant, list_tenants
@@ -57,6 +65,7 @@ class HeartbeatBody(BaseModel):
     products: dict[str, str]
     caps_digest: str | None = None
     role: str | None = None
+    memory_endpoint: str | None = None
     ledger_dropped_total: int | None = None
     agent_ledger_dropped_total: int | None = None
 
@@ -193,8 +202,16 @@ async def ai_score(request: Request):
     s = state(request)
     caps = await aggregate_caps(s)
     metrics = await s.cache.get_metrics()
-    incidents = await s.store.fetchall("SELECT incident_id FROM incidents")
-    return compute_ai_score(caps, metrics, len(incidents))
+    incidents = await s.store.fetchall(
+        "SELECT incident_id FROM incidents WHERE state IN ('open','investigating')"
+    )
+    mean_staleness = (caps.get("rag") or {}).get("mean_staleness")
+    return compute_ai_score(
+        caps,
+        metrics,
+        len(incidents),
+        mean_staleness=mean_staleness,
+    )
 
 
 @router.get("/metrics/prismdriver")
@@ -213,14 +230,32 @@ async def status_dogfood(request: Request):
 
 @router.post("/metrics/cold-audit")
 async def cold_audit(request: Request, _=require_role("operator")):
+    """Honest cold-audit: live adapter when available; never invent hit rates."""
+    s = state(request)
     body = await request.json()
     queries = body.get("queries") or []
+    audit_fn = getattr(s.graph, "cold_audit", None) or getattr(s.graph, "audit_queries", None)
+    if callable(audit_fn):
+        try:
+            result = await audit_fn(queries) if asyncio.iscoroutinefunction(audit_fn) else audit_fn(queries)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return {**(result if isinstance(result, dict) else {"result": result}), "simulated": False}
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "simulated": False,
+                "query_count": len(queries),
+                "estimated_cache_hits": None,
+                "error": str(exc),
+                "demo": s.adapter_sources.get("graph") == "null",
+            }
     return {
-        "simulated": True,
+        "simulated": False,
         "query_count": len(queries),
-        "estimated_cache_hits": int(len(queries) * 0.7),
-        "note": "chorusgraph-audit-style simulation; DEMO when NullAdapters",
-        "demo": state(request).adapter_sources.get("graph") == "null",
+        "estimated_cache_hits": None,
+        "results": [],
+        "note": "No live ChorusGraph cold-audit adapter; refusing to invent hit estimates",
+        "demo": s.adapter_sources.get("graph") == "null",
     }
 
 
@@ -360,6 +395,7 @@ async def fleet_heartbeat(body: HeartbeatBody, request: Request):
             products=body.products,
             caps_digest=body.caps_digest,
             role=body.role,
+            memory_endpoint=body.memory_endpoint,
         )
     except ValueError as exc:
         raise HTTPException(401, detail=str(exc)) from exc
@@ -552,7 +588,11 @@ async def job_reindex(request: Request, principal=require_role("operator")):
     body = await request.json()
     s = state(request)
     _grace_block(s)
-    job = await s.jobs.trigger_reindex(body.get("tenant_id", "default"), body.get("category_id"))
+    tenant_id = body.get("tenant_id", "default")
+    job = await s.jobs.trigger_reindex(tenant_id, body.get("category_id"))
+    await s.audit.log_action(
+        principal.user, "job.reindex", tenant_id, {"job_id": job.job_id, "category_id": body.get("category_id")}
+    )
     return job.__dict__
 
 
@@ -633,6 +673,134 @@ async def memory_cascade(cascade_id: str, request: Request, _=require_role("view
     return await cascade_status(cascade_id, request)
 
 
+# --- Cortex (PrismCortex ops console; Memory tab renamed) ---
+
+
+@router.get("/cortex/snapshot")
+async def cortex_snapshot(
+    request: Request, tenant_id: str = "default", _=require_role("viewer")
+):
+    from choruscontrol.services.cortex_ops import resolve_snapshot
+
+    return await resolve_snapshot(state(request), tenant_id)
+
+
+@router.get("/cortex/activity")
+async def cortex_activity(
+    request: Request, tenant_id: str = "default", _=require_role("viewer")
+):
+    from choruscontrol.services.cortex_ops import snapshot
+
+    snap = snapshot(tenant_id)
+    return {
+        "tenant_id": tenant_id,
+        "engine": snap.get("engine"),
+        "activity": snap.get("activity") or [],
+    }
+
+
+@router.get("/cortex/chunks")
+async def cortex_chunks(
+    request: Request, tenant_id: str = "default", _=require_role("viewer")
+):
+    from choruscontrol.services.cortex_ops import snapshot
+
+    snap = snapshot(tenant_id)
+    return {
+        "tenant_id": tenant_id,
+        "engine": snap.get("engine"),
+        "chunks": snap.get("chunks") or [],
+        "edges": snap.get("edges") or [],
+        "count": len(snap.get("chunks") or []),
+    }
+
+
+@router.post("/cortex/digest")
+async def cortex_digest(request: Request, principal=require_role("operator")):
+    from choruscontrol.services.cortex_ops import digest
+
+    s = state(request)
+    _grace_block(s)
+    body = await request.json()
+    tid = body.get("tenant_id", "default")
+    try:
+        result = digest(tid, body.get("text") or "", agent_id=principal.user)
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    await s.audit.log_action(principal.user, "cortex.digest", tid, result)
+    return result
+
+
+@router.post("/cortex/recall")
+async def cortex_recall(request: Request, _=require_role("viewer")):
+    from choruscontrol.services.cortex_ops import recall
+
+    body = await request.json()
+    try:
+        return recall(body.get("tenant_id", "default"), body.get("query") or "")
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+
+
+@router.post("/cortex/explain")
+async def cortex_explain(request: Request, _=require_role("viewer")):
+    from choruscontrol.services.cortex_ops import explain
+
+    body = await request.json()
+    try:
+        return explain(body.get("tenant_id", "default"), body.get("query") or "")
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+
+
+@router.post("/cortex/sleep")
+async def cortex_sleep(request: Request, principal=require_role("operator")):
+    from choruscontrol.services.cortex_ops import sleep_tenant
+
+    s = state(request)
+    _grace_block(s)
+    body = await request.json()
+    tid = body.get("tenant_id", "default")
+    try:
+        result = sleep_tenant(tid)
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    # Also enqueue maintenance sleep job for fleet agents
+    job = await s.jobs.trigger_sleep(tid)
+    await s.audit.log_action(
+        principal.user, "cortex.sleep", tid, {"result": result, "job_id": job.job_id}
+    )
+    return {**result, "job_id": job.job_id}
+
+
+@router.post("/cortex/conflicts/resolve")
+async def cortex_resolve(request: Request, principal=require_role("operator")):
+    from choruscontrol.services.cortex_ops import resolve_conflict as cx_resolve
+
+    s = state(request)
+    _grace_block(s)
+    body = await request.json()
+    tid = body.get("tenant_id", "default")
+    try:
+        result = cx_resolve(
+            tid,
+            body.get("subject") or "",
+            body.get("relation") or "is",
+            body.get("chosen_value") or body.get("new_value") or "",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    cascade = await s.cascade.run(
+        tid,
+        tags=[f"cortex:conflict:{body.get('subject')}", f"tenant:{tid}"],
+        reason="cortex_conflict_resolve",
+    )
+    await s.audit.log_action(
+        principal.user, "cortex.conflict.resolve", tid, {"result": result, "cascade": cascade}
+    )
+    return {"resolved": result, "cascade": cascade}
+
+
 # --- Taxonomy ---
 
 
@@ -643,10 +811,81 @@ async def taxonomy_tree(request: Request, tenant_id: str = "default", _=require_
 
 @router.post("/taxonomy/search")
 async def taxonomy_search(request: Request, _=require_role("viewer")):
+    from choruscontrol.services.taxonomy_rag import search_term
+
     body = await request.json()
-    return {
-        "results": await state(request).rag.search(body.get("tenant_id", "default"), body.get("query", ""))
-    }
+    tid = body.get("tenant_id", "default")
+    query = body.get("query", "")
+    top_k = int(body.get("top_k") or 8)
+    category_filter = body.get("category_filter")
+    # Pre-await NullRAG fallback hits when PrismRAG is unavailable
+    fallback_hits = await state(request).rag.search(tid, query)
+    return search_term(
+        tid,
+        query,
+        top_k=top_k,
+        category_filter=category_filter,
+        fallback_search=lambda _t, _q: fallback_hits,
+    )
+
+
+@router.post("/taxonomy/related")
+async def taxonomy_related(request: Request, _=require_role("viewer")):
+    from choruscontrol.services.taxonomy_rag import related_terms
+
+    body = await request.json()
+    return related_terms(body.get("tenant_id", "default"), body.get("query", ""))
+
+
+@router.get("/taxonomy/chunks")
+async def taxonomy_list_chunks(
+    request: Request, tenant_id: str = "default", _=require_role("viewer")
+):
+    from choruscontrol.services.taxonomy_rag import list_chunks
+
+    return list_chunks(tenant_id)
+
+
+@router.post("/taxonomy/chunks/overwrite")
+async def taxonomy_overwrite_chunk(request: Request, principal=require_role("admin")):
+    """Online overwrite a chunk via PrismRAG.append_chunks (upsert by ref)."""
+    from choruscontrol.services.taxonomy_rag import overwrite_chunk
+
+    s = state(request)
+    _grace_block(s)
+    body = await request.json()
+    tid = body.get("tenant_id", "default")
+    try:
+        result = overwrite_chunk(
+            tid,
+            chunk_ref=body.get("chunk_ref") or body.get("ref") or "",
+            text=body.get("text") or body.get("chunk_text") or "",
+            category_slug=body.get("category_slug"),
+            new_rules=body.get("new_rules"),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    await s.audit.log_action(
+        principal.user,
+        "taxonomy.chunk.overwrite",
+        tid,
+        {
+            "chunk_ref": result.get("chunk_ref"),
+            "category_slug": result.get("category_slug"),
+            "quality_score": result.get("quality_score"),
+        },
+    )
+    # Bump partition version so Taxonomy UI shows the overwrite
+    warm = getattr(s.rag, "warm_partition", None)
+    if warm:
+        part = body.get("partition") or f"kb_{result.get('category_slug') or 'markdown'}"
+        try:
+            warm(tid, part)
+        except Exception:  # noqa: BLE001
+            pass
+    return result
 
 
 @router.get("/taxonomy/partitions")
@@ -802,6 +1041,7 @@ async def admin_license(request: Request, _=require_role("viewer")):
         claims = st.claims.model_dump()
         if isinstance(claims.get("features"), set):
             claims["features"] = sorted(claims["features"])
+    online = s.online_license or {}
     return {
         "state": st.state,
         "message": st.message,
@@ -810,6 +1050,32 @@ async def admin_license(request: Request, _=require_role("viewer")):
         "grace_remaining_seconds": st.grace_remaining_seconds,
         "support_url": s.settings.insightits_support_url,
         "portal_url": s.settings.insightits_portal_url,
+        "online_check": {
+            "enabled": s.settings.license_online_check and not (
+                s.settings.demo_mode and not s.settings.license_online_check_in_demo
+            ),
+            "interval_days": s.settings.license_online_interval_days,
+            "api_base": s.settings.side1_api_base_url or s.settings.insightits_portal_url,
+            "last": {
+                k: online.get(k)
+                for k in (
+                    "status",
+                    "valid",
+                    "registryStatus",
+                    "checkedAt",
+                    "checked_at_unix",
+                    "recommendedCheckIntervalDays",
+                    "warnings",
+                    "last_error",
+                    "offlineOk",
+                    "phoneHomeRequired",
+                    "message",
+                )
+                if k in online
+            }
+            if online
+            else None,
+        },
         "stack": {
             "adapters": s.adapter_sources,
             "pins_summary": {
@@ -820,29 +1086,64 @@ async def admin_license(request: Request, _=require_role("viewer")):
     }
 
 
+@router.post("/admin/license/online-check")
+async def admin_license_online_check(request: Request, principal=require_role("admin")):
+    """Force Side 1 validate (revocation). Offline Ed25519 remains primary on network failure."""
+    s = state(request)
+    out = await s.run_license_online_check(force=True)
+    await s.audit.log_action(
+        principal.user,
+        "admin.license.online_check",
+        "*",
+        {
+            "ok": out.get("ok"),
+            "skipped": out.get("skipped"),
+            "status": (out.get("result") or {}).get("status") or out.get("error"),
+        },
+    )
+    return {
+        "check": out,
+        "license": {
+            "state": s.license_status.state,
+            "message": s.license_status.message,
+        },
+    }
+
+
 @router.post("/admin/license")
 async def admin_license_install(
     body: LicenseInstallBody, request: Request, principal=require_role("admin")
 ):
+    """Install/renew license — allowed during grace (renewal path)."""
     s = state(request)
-    _grace_block(s)
     status = s.license_verifier.verify(body.license_key)
     if status.state not in ("valid", "grace"):
         raise HTTPException(400, detail={"message": status.message, "state": status.state})
     save_stored_license(s.settings, body.license_key)
     s.settings.license_key = body.license_key
     s.license_status = status
+    # Connected installs: refresh Side 1 revocation status on install
+    online = await s.run_license_online_check(force=True)
     await s.audit.log_action(
         principal.user,
         "admin.license.install",
         "*",
-        {"state": status.state, "license_id": status.claims.license_id if status.claims else None},
+        {
+            "state": s.license_status.state,
+            "license_id": status.claims.license_id if status.claims else None,
+            "online": {
+                "ok": online.get("ok"),
+                "skipped": online.get("skipped"),
+                "status": (online.get("result") or {}).get("status"),
+            },
+        },
     )
     return {
         "ok": True,
-        "state": status.state,
-        "message": status.message,
+        "state": s.license_status.state,
+        "message": s.license_status.message,
         "claims": _redact_license_claims(status.claims.model_dump() if status.claims else None),
+        "online_check": online,
     }
 
 
@@ -1093,6 +1394,29 @@ async def incidents_get(incident_id: str, request: Request, _=require_role("view
     return row
 
 
+@router.get("/incidents/{incident_id}/intelligence")
+async def incidents_intel(incident_id: str, request: Request, _=require_role("viewer")):
+    row = await incident_intelligence(state(request).store, incident_id)
+    if not row:
+        raise HTTPException(404)
+    return row
+
+
+@router.patch("/incidents/{incident_id}")
+async def incidents_patch(incident_id: str, request: Request, principal=require_role("operator")):
+    s = state(request)
+    _grace_block(s)
+    body = await request.json()
+    try:
+        row = await update_incident_state(s.store, incident_id, body.get("state", "open"))
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    if not row:
+        raise HTTPException(404)
+    await s.audit.log_action(principal.user, "incident.update", row["tenant_id"], row)
+    return row
+
+
 @router.post("/incidents")
 async def incidents_create(body: IncidentBody, request: Request, principal=require_role("operator")):
     s = state(request)
@@ -1100,6 +1424,91 @@ async def incidents_create(body: IncidentBody, request: Request, principal=requi
     inc = await create_incident(s.store, tenant_id=body.tenant_id, title=body.title, details=body.details)
     await s.audit.log_action(principal.user, "incident.create", body.tenant_id, inc)
     return inc
+
+
+@router.get("/fleet/version-diff")
+async def fleet_version_diff(
+    request: Request,
+    node_id: str | None = None,
+    tenant_id: str = "default",
+    day_a: str | None = None,
+    day_b: str | None = None,
+    _=require_role("viewer"),
+):
+    from choruscontrol.services.version_intel import version_diff
+
+    return await version_diff(
+        state(request).store,
+        node_id=node_id,
+        tenant_id=tenant_id,
+        day_a=day_a,
+        day_b=day_b,
+    )
+
+
+@router.post("/fleet/deployment-snapshot")
+async def fleet_deployment_snapshot(
+    request: Request, tenant_id: str = "default", principal=require_role("operator")
+):
+    from choruscontrol.services.version_intel import record_deployment_snapshot
+
+    s = state(request)
+    _grace_block(s)
+    out = await record_deployment_snapshot(s, tenant_id)
+    await s.audit.log_action(principal.user, "deployment.snapshot", tenant_id, out)
+    return out
+
+
+@router.get("/enterprise/policies")
+async def enterprise_policies_list(
+    request: Request, tenant_id: str | None = None, _=require_role("viewer")
+):
+    from choruscontrol.services.enterprise_policy import list_policies
+
+    return {"policies": await list_policies(state(request).store, tenant_id), "domains": [
+        "memory.write",
+        "model.allowlist",
+        "deployment.approval",
+    ]}
+
+
+@router.put("/enterprise/policies")
+async def enterprise_policies_put(request: Request, principal=require_role("admin")):
+    from choruscontrol.services.enterprise_policy import upsert_policy
+
+    s = state(request)
+    _grace_block(s)
+    body = await request.json()
+    try:
+        pol = await upsert_policy(
+            s.store,
+            domain=body["domain"],
+            tenant_id=body.get("tenant_id", "default"),
+            name=body.get("name", "default"),
+            body=body.get("body") or {},
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    await s.audit.log_action(principal.user, "enterprise.policy.upsert", pol["tenant_id"], pol)
+    return pol
+
+
+@router.get("/compliance/findings")
+async def compliance_findings(request: Request, _=require_role("viewer")):
+    from choruscontrol.services.compliance import list_findings
+
+    return {"findings": await list_findings(state(request).store)}
+
+
+@router.post("/compliance/scan")
+async def compliance_scan(request: Request, principal=require_role("operator")):
+    from choruscontrol.services.compliance import run_compliance_scan
+
+    s = state(request)
+    _grace_block(s)
+    out = await run_compliance_scan(s)
+    await s.audit.log_action(principal.user, "compliance.scan", "default", {"count": out.get("count")})
+    return out
 
 
 # --- Traces ---

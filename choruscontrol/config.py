@@ -48,6 +48,18 @@ class Settings(BaseSettings):
     insightits_portal_url: str = Field(
         default="https://www.insightits.com", alias="INSIGHTITS_PORTAL_URL"
     )
+    # Optional Side 1 API base (local: http://127.0.0.1:5000). Defaults to portal URL.
+    side1_api_base_url: str | None = Field(
+        default=None, alias="CHORUSCONTROL_SIDE1_API_BASE_URL"
+    )
+    # Connected installs: optional 14-day online validate for revocation. Air-gap: set 0.
+    license_online_check: bool = Field(default=True, alias="CHORUSCONTROL_LICENSE_ONLINE_CHECK")
+    license_online_interval_days: float = Field(
+        default=14.0, alias="CHORUSCONTROL_LICENSE_ONLINE_INTERVAL_DAYS"
+    )
+    license_online_check_in_demo: bool = Field(
+        default=False, alias="CHORUSCONTROL_LICENSE_ONLINE_CHECK_IN_DEMO"
+    )
 
     jobs_max_concurrent: int = Field(default=2, alias="JOBS_MAX_CONCURRENT")
     invalidation_threshold: float = Field(default=0.55, alias="INVALIDATION_THRESHOLD")
@@ -70,6 +82,8 @@ class Settings(BaseSettings):
     )
     tenant_id: str = Field(default="default", alias="CHORUSCONTROL_TENANT_ID")
     heartbeat_interval_seconds: float = Field(default=10.0, alias="CHORUSCONTROL_HEARTBEAT_INTERVAL")
+    # R04 — advertise where this agent's Cortex memory is reachable (http(s) or local://node)
+    memory_endpoint: str | None = Field(default=None, alias="CHORUSCONTROL_MEMORY_ENDPOINT")
 
     # OIDC / SSO (optional enterprise)
     oidc_enabled: bool = Field(default=False, alias="CHORUSCONTROL_OIDC_ENABLED")

@@ -235,6 +235,11 @@ class LiveRag:
         if fn:
             fn(tenant_id, partition)
 
+    def reindex(self, tenant_id: str, category_id: str | None = None) -> None:
+        fn = getattr(self._b, "reindex", None) or getattr(self._b, "reindex_category", None)
+        if fn:
+            fn(tenant_id, category_id)
+
 
 class LiveFabric:
     def __init__(self, backend: Any) -> None:

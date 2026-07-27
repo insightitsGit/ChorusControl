@@ -4,7 +4,7 @@ WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY choruscontrol ./choruscontrol
 COPY scripts ./scripts
-RUN pip install --no-cache-dir --prefix=/install ".[server,agent,postgres]"
+RUN pip install --no-cache-dir --prefix=/install ".[server,agent,postgres,prism]"
 
 FROM python:3.12-slim
 WORKDIR /app

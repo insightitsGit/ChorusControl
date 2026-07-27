@@ -89,15 +89,25 @@ const blurbs = {
   trace: "Stitched Guard → Ledger → Shine wire. Replay is zero-token from cache.",
   taxonomy: "Knowledge partitions, chunk health, and maintenance jobs.",
   memory: "Bitemporal facts and conflict resolution with correction cascade.",
+  cortex: "PrismCortex activity, memory graph chunks, digest / recall / sleep.",
   guard: "Policy Studio for ingress profiles — hub paths never force law ONNX.",
-  admin: "License, doctor, fleet enrollment, Asset Graph, and compliance export.",
+  admin: "License, doctor, fleet enrollment, Asset Graph, incidents, and compliance.",
 };
+
+let viewMode = localStorage.getItem("cc_view_mode") || "ops";
+function setViewMode(mode) {
+  viewMode = mode;
+  localStorage.setItem("cc_view_mode", mode);
+  document.body.dataset.viewMode = mode;
+  if (typeof lastRender === "function") lastRender();
+}
 
 const eyebrows = {
   overview: "Command center",
   trace: "Execution truth",
   taxonomy: "Knowledge ops",
   memory: "Cortex memory",
+  cortex: "PrismCortex",
   guard: "Security governance",
   admin: "Platform control",
 };
@@ -119,22 +129,25 @@ function cssVar(name, fallback = "") {
 
 let lastRender = null; // re-run current tab render on theme flip (charts/viz pick up new palette)
 
-function applyThemeLabel() {
-  const label = document.getElementById("themeLabel");
-  if (label) {
-    const t = document.documentElement.getAttribute("data-theme");
-    label.textContent = t === "dark" ? "Light mode" : "Dark mode";
-  }
+function setTheme(next) {
+  const theme = next === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("cc_theme", theme);
+  document.querySelectorAll("[data-theme-set]").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.getAttribute("data-theme-set") === theme);
+  });
+  if (lastRender) requestAnimationFrame(() => lastRender());
 }
-applyThemeLabel();
+
+setTheme(document.documentElement.getAttribute("data-theme") || "dark");
+
+document.querySelectorAll("[data-theme-set]").forEach((btn) => {
+  btn.addEventListener("click", () => setTheme(btn.getAttribute("data-theme-set")));
+});
 
 document.getElementById("themeToggle")?.addEventListener("click", () => {
   const cur = document.documentElement.getAttribute("data-theme");
-  const next = cur === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", next);
-  localStorage.setItem("cc_theme", next);
-  applyThemeLabel();
-  if (lastRender) requestAnimationFrame(() => lastRender());
+  setTheme(cur === "dark" ? "light" : "dark");
 });
 
 function setChatOpen(open) {
@@ -178,7 +191,32 @@ async function askAssistant(question, { confirm = false, execute = null } = {}) 
   } finally {
     stopTyping();
   }
-  let html = escapeHtml(r.answer || "");
+  let html = formatAssistantText(r.answer || "");
+  const g = r.grounding || {};
+  const w = r.wire || {};
+  const wireBits = [];
+  if (w.guard?.decision) wireBits.push(`Guard ${String(w.guard.decision).toUpperCase()}`);
+  if (w.graph?.hops?.length) wireBits.push(`Graph ${w.graph.hops.join("→")}`);
+  if (w.shine?.decision) wireBits.push(`Shine ${String(w.shine.decision).toUpperCase()}`);
+  if (w.mode) wireBits.push(w.mode === "live" ? "live wire" : "fallback");
+  if (g.ai_score != null || wireBits.length) {
+    html =
+      `<div class="score-meta" style="margin-bottom:0.45rem">${
+        g.ai_score != null
+          ? `Live grounding · AI Score <strong>${escapeHtml(String(g.ai_score))}</strong> · agents ${escapeHtml(
+              String(g.online ?? "?")
+            )}/${escapeHtml(String(g.nodes ?? "?"))} · incidents ${escapeHtml(String(g.incidents ?? 0))}${
+              g.demo ? " · DEMO" : ""
+            }`
+          : ""
+      }${
+        wireBits.length
+          ? `${g.ai_score != null ? "<br/>" : ""}<span class="wire-chips">${wireBits
+              .map((b) => `<span class="wire-chip">${escapeHtml(b)}</span>`)
+              .join("")}</span>`
+          : ""
+      }</div>` + html;
+  }
   if (r.actions?.length) {
     html += `<div style="margin-top:0.5rem">${r.actions
       .map(
@@ -205,6 +243,12 @@ async function askAssistant(question, { confirm = false, execute = null } = {}) 
     };
   });
   return r;
+}
+
+function formatAssistantText(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br/>");
 }
 
 function escapeHtml(s) {
@@ -433,10 +477,68 @@ async function renderOverview(payload) {
   const overall = payload.score?.overall ?? 0;
   const driver = payload.driver || {};
   const dogfood = payload.dogfood || {};
+  const incidents = payload.incidents?.incidents || [];
+  const findings = payload.findings?.findings || [];
+  const modeToggle = `<div class="field" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.75rem">
+    ${["ops", "exec", "eng"]
+      .map(
+        (m) =>
+          `<button type="button" class="btn ${viewMode === m ? "" : "secondary"}" data-view-mode="${m}">${m}</button>`
+      )
+      .join("")}
+  </div>`;
+
+  const execPanel =
+    viewMode === "exec"
+      ? section(
+          "Executive",
+          `<p class="score-meta">Score, open incidents, compliance findings — business impact.</p>
+           <table class="data"><thead><tr><th>Incident</th><th>State</th><th>Tenant</th></tr></thead><tbody>${
+             incidents
+               .slice(0, 8)
+               .map(
+                 (i) =>
+                   `<tr><td>${escapeHtml(i.title || i.incident_id)}</td><td>${escapeHtml(
+                     i.state
+                   )}</td><td>${escapeHtml(i.tenant_id)}</td></tr>`
+               )
+               .join("") || `<tr><td colspan="3" class="empty">No open incidents</td></tr>`
+           }</tbody></table>
+           <div class="section-head" style="margin-top:1rem"><h2 style="font-size:0.9rem">Compliance findings</h2></div>
+           <table class="data"><thead><tr><th>Sev</th><th>Title</th></tr></thead><tbody>${
+             findings
+               .slice(0, 6)
+               .map(
+                 (f) =>
+                   `<tr><td>${escapeHtml(f.severity)}</td><td>${escapeHtml(f.title)}</td></tr>`
+               )
+               .join("") || `<tr><td colspan="2" class="empty">Run Admin → Compliance scan</td></tr>`
+           }</tbody></table>`,
+          "Exec lens",
+          0
+        )
+      : "";
+
+  const engPanel =
+    viewMode === "eng"
+      ? section(
+          "Engineering",
+          `<p class="score-meta">Version diff · blast radius · replay live on Trace tab.</p>
+           <pre class="surface" style="max-height:220px;overflow:auto;font-size:0.75rem">${escapeHtml(
+             JSON.stringify(payload.versionDiff || { note: "snapshot after heartbeats" }, null, 2)
+           )}</pre>
+           <p style="margin-top:0.5rem">${btn("Refresh version diff", "engDiff", "secondary")}</p>`,
+          "Eng lens",
+          0
+        )
+      : "";
 
   view.className = "view";
   view.innerHTML = `
-    <div class="hero-ops reveal">
+    ${modeToggle}
+    ${execPanel}
+    ${engPanel}
+    <div class="hero-ops reveal" ${viewMode === "exec" ? 'style="opacity:0.92"' : ""}>
       <div class="score-hero">
         <p class="score-kicker">AI Score ${payload.score?.demo ? "· Demo inputs" : "· Live formula"}</p>
         <div class="score-value" id="scoreNum">0.0</div>
@@ -575,6 +677,19 @@ async function renderOverview(payload) {
     });
     CCViz.renderCascade(document.getElementById("vizCascade"), pipes.cascade);
   });
+
+  document.querySelectorAll("[data-view-mode]").forEach((el) => {
+    el.onclick = () => setViewMode(el.getAttribute("data-view-mode"));
+  });
+  const engBtn = document.getElementById("engDiff");
+  if (engBtn) {
+    engBtn.onclick = async () => {
+      const diff = await soft("/api/v1/fleet/version-diff?tenant_id=default", {});
+      payload.versionDiff = diff;
+      lastRender = () => renderOverview(payload);
+      await renderOverview(payload);
+    };
+  }
 }
 
 async function renderTrace(payload) {
@@ -675,36 +790,91 @@ async function renderTrace(payload) {
 }
 
 async function renderTaxonomy(payload) {
-  actions.innerHTML = btn("Reindex", "doReindex", "secondary") + btn("Warm partition", "doWarm");
+  const tenantId =
+    payload.tenantId ||
+    (payload.partitions?.partitions || []).find((p) => p.tenant_id)?.tenant_id ||
+    "default";
+  const partsList = payload.partitions?.partitions || [];
+  const defaultPartition =
+    partsList.find((p) => String(p.partition || "").includes("clinical"))?.partition ||
+    partsList[0]?.partition ||
+    "kb_markdown";
+
+  actions.innerHTML =
+    btn("Reindex", "doReindex", "secondary") +
+    btn("Warm partition", "doWarm") +
+    btn("Refresh", "doTaxRefresh", "secondary");
+
   const cats = (payload.tree?.categories || [])
-    .map((c) => `<tr><td>${c.slug}</td><td>${c.label || "—"}</td></tr>`)
+    .map((c) => `<tr><td>${escapeHtml(c.slug)}</td><td>${escapeHtml(c.label || "—")}</td></tr>`)
     .join("");
-  const parts = (payload.partitions?.partitions || [])
-    .map((p) => `<tr><td>${p.partition}</td><td>${p.version}</td><td>${p.tenant_id || ""}</td></tr>`)
+  const parts = partsList
+    .map(
+      (p) => `<tr>
+      <td>${escapeHtml(p.partition)}</td>
+      <td><strong>${escapeHtml(String(p.version ?? "—"))}</strong></td>
+      <td>${escapeHtml(p.status || "ready")}</td>
+      <td>${escapeHtml(p.tenant_id || "")}</td>
+    </tr>`
+    )
     .join("");
   const decay = (payload.health?.decay || [])
     .map((d) => {
       const stale = Number(d.staleness) || 0;
-      return `<tr><td>${d.slug}</td><td>${stale.toFixed(2)}</td><td>${
+      return `<tr><td>${escapeHtml(d.slug)}</td><td>${stale.toFixed(2)}</td><td>${
         stale > 0.3 ? status(false, "stale") : status(true, "fresh")
       }</td></tr>`;
     })
     .join("");
 
+  const partOptions = partsList
+    .map(
+      (p) =>
+        `<option value="${escapeHtml(p.partition)}" ${
+          p.partition === defaultPartition ? "selected" : ""
+        }>${escapeHtml(p.partition)} (v${escapeHtml(String(p.version ?? "?"))})</option>`
+    )
+    .join("");
+
   view.innerHTML = `
+    <div class="tax-toolbar surface" style="margin-bottom:1rem;padding:0.85rem 1rem">
+      <div class="tax-toolbar-row">
+        <label>Tenant
+          <select id="taxTenant">
+            <option value="aurora-health" ${tenantId === "aurora-health" ? "selected" : ""}>aurora-health</option>
+            <option value="aurora-pharmacy" ${tenantId === "aurora-pharmacy" ? "selected" : ""}>aurora-pharmacy</option>
+            <option value="default" ${tenantId === "default" ? "selected" : ""}>default</option>
+          </select>
+        </label>
+        <label>Partition
+          <select id="taxPartition">${
+            partOptions || `<option value="kb_markdown">kb_markdown</option>`
+          }</select>
+        </label>
+        <label class="tax-search">Search term
+          <input id="taxQuery" type="search" placeholder="med recon, allergy, insulin…" />
+        </label>
+        <button type="button" class="btn" id="doTaxSearch">Search + embed</button>
+      </div>
+      <div id="taxJobStatus" class="score-meta" style="margin-top:0.65rem" role="status">
+        Search runs PrismRAG embed retrieval, shows related words, and lets admins overwrite a chunk online.
+      </div>
+    </div>
     <div class="grid-2">
       ${section(
         "Category tree",
         `<table class="data"><thead><tr><th>Slug</th><th>Label</th></tr></thead><tbody>${
           cats || `<tr><td colspan="2" class="empty">Empty</td></tr>`
         }</tbody></table>`,
-        "",
+        escapeHtml(tenantId),
         0
       )}
       ${section(
         "Partitions",
-        `<table class="data"><thead><tr><th>Partition</th><th>Ver</th><th>Tenant</th></tr></thead><tbody>${parts}</tbody></table>`,
-        "",
+        `<table class="data"><thead><tr><th>Partition</th><th>Ver</th><th>Status</th><th>Tenant</th></tr></thead><tbody>${
+          parts || `<tr><td colspan="4" class="empty">No partitions</td></tr>`
+        }</tbody></table>`,
+        payload.tree?.demo || payload.health?.demo ? "DEMO NullRAG partitions" : "live",
         60
       )}
     </div>
@@ -713,80 +883,524 @@ async function renderTaxonomy(payload) {
       `<table class="data"><thead><tr><th>Category</th><th>Staleness</th><th>State</th></tr></thead><tbody>${
         decay || `<tr><td colspan="3" class="empty">No decay data</td></tr>`
       }</tbody></table>
-       <p class="score-meta" style="margin-top:0.75rem">Bleed risk: ${payload.health?.bleed_risk ?? "n/a"}</p>`,
+       <p class="score-meta" style="margin-top:0.75rem">Bleed risk: ${
+         payload.health?.bleed_risk ?? "n/a"
+       }</p>`,
       "PrismRAG",
-      100
+      80
+    )}
+    ${section(
+      "Search · related embeddings · overwrite",
+      `<div id="taxSearchHits"><p class="empty">Search a term to see hits, related words from the embedding/community graph, and edit a chunk online.</p></div>`,
+      "admin overwrite",
+      120
     )}
   `;
 
-  document.getElementById("doReindex").onclick = async () => {
-    out.textContent = JSON.stringify(
-      await j("/api/v1/jobs/reindex", { method: "POST", body: JSON.stringify({ tenant_id: "default" }) }),
-      null,
-      2
-    );
-  };
-  document.getElementById("doWarm").onclick = async () => {
-    out.textContent = JSON.stringify(
-      await j("/api/v1/jobs/warm-partition", {
+  async function reloadTaxonomy(nextTenant) {
+    const tid = nextTenant || document.getElementById("taxTenant")?.value || tenantId;
+    const [tree, partitions, health] = await Promise.all([
+      soft(`/api/v1/taxonomy/tree?tenant_id=${encodeURIComponent(tid)}`, { categories: [] }),
+      soft(`/api/v1/taxonomy/partitions?tenant_id=${encodeURIComponent(tid)}`, { partitions: [] }),
+      soft(`/api/v1/taxonomy/chunks/health?tenant_id=${encodeURIComponent(tid)}`, { decay: [] }),
+    ]);
+    const next = { tree, partitions, health, tenantId: tid };
+    lastRender = () => renderTaxonomy(next);
+    await renderTaxonomy(next);
+  }
+
+  async function pollJob(jobId, label) {
+    const statusEl = document.getElementById("taxJobStatus");
+    for (let i = 0; i < 40; i++) {
+      const job = await j(`/api/v1/jobs/${jobId}`);
+      if (statusEl) {
+        statusEl.innerHTML = `${escapeHtml(label)} · <code>${escapeHtml(jobId)}</code> · ${status(
+          job.state === "completed",
+          job.state
+        )}${job.error ? ` · ${escapeHtml(String(job.error))}` : ""}`;
+      }
+      if (out) out.textContent = JSON.stringify(job, null, 2);
+      if (job.state === "completed" || job.state === "failed") return job;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return null;
+  }
+
+  function renderSearchPanel(r) {
+    const hitsEl = document.getElementById("taxSearchHits");
+    if (!hitsEl) return;
+    const resultRows = r.results || [];
+    const related = (r.related_terms || [])
+      .map(
+        (t) =>
+          `<button type="button" class="rel-chip" data-term="${escapeHtml(t.term)}" title="${escapeHtml(
+            t.relation || t.source || ""
+          )}">${escapeHtml(t.term)}</button>`
+      )
+      .join("");
+    const rows = resultRows
+      .map((h, i) => {
+        const ref = h.chunk_ref || h.category_slug || `hit-${i}`;
+        const text = h.chunk_text || h.text || "";
+        return `<tr>
+          <td><code>${escapeHtml(ref)}</code></td>
+          <td>${escapeHtml(h.category_slug || "")}</td>
+          <td>${escapeHtml(text)}</td>
+          <td>${escapeHtml(String(h.score ?? ""))}</td>
+          <td><button type="button" class="btn secondary tax-pick" data-i="${i}">Edit</button></td>
+        </tr>`;
+      })
+      .join("");
+    hitsEl.innerHTML = `
+      <p class="score-meta">Engine <strong>${escapeHtml(r.engine || "?")}</strong>
+        · mode <strong>${escapeHtml(r.retrieval_mode || "?")}</strong>
+        ${r.demo ? " · DEMO fallback" : " · live PrismRAG"}
+        · query <code>${escapeHtml(r.query || "")}</code></p>
+      <div class="rel-wrap">
+        <div class="section-head"><h2 style="font-size:0.9rem;margin:0">Related words (embed / community)</h2></div>
+        <div class="rel-chips">${related || `<span class="empty">No related terms</span>`}</div>
+        <p class="score-meta">Click a related word to re-search. Hover for why it is related.</p>
+      </div>
+      <table class="data" style="margin-top:0.85rem">
+        <thead><tr><th>Chunk ref</th><th>Category</th><th>Text</th><th>Score</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">No hits</td></tr>`}</tbody>
+      </table>
+      <div id="taxOverwrite" class="tax-overwrite surface" hidden style="margin-top:1rem;padding:0.9rem 1rem">
+        <div class="section-head"><h2 style="font-size:0.95rem;margin:0">Overwrite chunk online</h2>
+          <span class="hint">PrismRAG append_chunks upsert</span></div>
+        <label class="tax-ow-label">Chunk ref <input id="owRef" readonly /></label>
+        <label class="tax-ow-label">Category <input id="owCat" /></label>
+        <label class="tax-ow-label">Chunk text
+          <textarea id="owText" rows="5"></textarea>
+        </label>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.55rem">
+          <button type="button" class="btn" id="owSave">Save overwrite</button>
+          <button type="button" class="btn secondary" id="owCancel">Cancel</button>
+        </div>
+        <p id="owStatus" class="score-meta" style="margin-top:0.55rem"></p>
+      </div>`;
+
+    hitsEl.querySelectorAll(".rel-chip").forEach((chip) => {
+      chip.addEventListener("click", async () => {
+        const term = chip.getAttribute("data-term") || "";
+        const input = document.getElementById("taxQuery");
+        if (input) input.value = term;
+        await runTaxSearch(term);
+      });
+    });
+
+    hitsEl.querySelectorAll(".tax-pick").forEach((b) => {
+      b.addEventListener("click", () => {
+        const i = Number(b.getAttribute("data-i") || 0);
+        const h = resultRows[i] || {};
+        const panel = document.getElementById("taxOverwrite");
+        if (!panel) return;
+        document.getElementById("owRef").value = h.chunk_ref || h.category_slug || "";
+        document.getElementById("owCat").value = h.category_slug || "";
+        document.getElementById("owText").value = h.chunk_text || h.text || "";
+        document.getElementById("owStatus").textContent = "";
+        panel.hidden = false;
+        panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    });
+
+    document.getElementById("owCancel")?.addEventListener("click", () => {
+      const panel = document.getElementById("taxOverwrite");
+      if (panel) panel.hidden = true;
+    });
+
+    document.getElementById("owSave")?.addEventListener("click", async () => {
+      const statusEl = document.getElementById("owStatus");
+      const tid = document.getElementById("taxTenant")?.value || tenantId;
+      const partition = document.getElementById("taxPartition")?.value || defaultPartition;
+      try {
+        if (statusEl) statusEl.textContent = "Saving overwrite via PrismRAG…";
+        const saved = await j("/api/v1/taxonomy/chunks/overwrite", {
+          method: "POST",
+          body: JSON.stringify({
+            tenant_id: tid,
+            chunk_ref: document.getElementById("owRef")?.value || "",
+            text: document.getElementById("owText")?.value || "",
+            category_slug: document.getElementById("owCat")?.value || null,
+            partition,
+          }),
+        });
+        if (statusEl) {
+          statusEl.innerHTML = `${status(true, "overwritten")} · ref <code>${escapeHtml(
+            saved.chunk_ref || ""
+          )}</code> · quality ${escapeHtml(String(saved.quality_score ?? "n/a"))}
+            · embed dim ${escapeHtml(String(saved.embedding_dim ?? 0))}`;
+        }
+        if (out) out.textContent = JSON.stringify(saved, null, 2);
+        await runTaxSearch(document.getElementById("taxQuery")?.value || saved.chunk_ref);
+      } catch (err) {
+        if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
+      }
+    });
+  }
+
+  async function runTaxSearch(forcedQuery) {
+    const hitsEl = document.getElementById("taxSearchHits");
+    const statusEl = document.getElementById("taxJobStatus");
+    const tid = document.getElementById("taxTenant")?.value || tenantId;
+    const query = forcedQuery != null ? forcedQuery : document.getElementById("taxQuery")?.value || "";
+    try {
+      if (statusEl) statusEl.textContent = `Searching “${query}” with PrismRAG…`;
+      const r = await j("/api/v1/taxonomy/search", {
         method: "POST",
-        body: JSON.stringify({ tenant_id: "default", partition: "kb_markdown" }),
-      }),
-      null,
-      2
-    );
+        body: JSON.stringify({ tenant_id: tid, query, top_k: 8 }),
+      });
+      if (out) out.textContent = JSON.stringify(r, null, 2);
+      renderSearchPanel(r);
+      if (statusEl) {
+        statusEl.innerHTML = `Search done · ${escapeHtml(r.engine || "")} · ${escapeHtml(
+          r.retrieval_mode || ""
+        )} · ${(r.results || []).length} hits · ${(r.related_terms || []).length} related terms`;
+      }
+    } catch (err) {
+      if (hitsEl) hitsEl.innerHTML = `<p class="err">${escapeHtml(err.message || err)}</p>`;
+      if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
+    }
+  }
+
+  document.getElementById("taxTenant")?.addEventListener("change", async (e) => {
+    await reloadTaxonomy(e.target.value);
+  });
+
+  document.getElementById("doTaxRefresh")?.addEventListener("click", async () => {
+    await reloadTaxonomy();
+  });
+
+  document.getElementById("doReindex").onclick = async () => {
+    const statusEl = document.getElementById("taxJobStatus");
+    const tid = document.getElementById("taxTenant")?.value || tenantId;
+    try {
+      if (statusEl) statusEl.textContent = "Queuing reindex…";
+      const queued = await j("/api/v1/jobs/reindex", {
+        method: "POST",
+        body: JSON.stringify({ tenant_id: tid }),
+      });
+      await pollJob(queued.job_id, "Reindex");
+      await reloadTaxonomy(tid);
+    } catch (err) {
+      if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
+    }
   };
+
+  document.getElementById("doWarm").onclick = async () => {
+    const statusEl = document.getElementById("taxJobStatus");
+    const tid = document.getElementById("taxTenant")?.value || tenantId;
+    const partition = document.getElementById("taxPartition")?.value || defaultPartition;
+    try {
+      if (statusEl) statusEl.textContent = `Queuing warm for ${partition}…`;
+      const queued = await j("/api/v1/jobs/warm-partition", {
+        method: "POST",
+        body: JSON.stringify({ tenant_id: tid, partition }),
+      });
+      await pollJob(queued.job_id, `Warm ${partition}`);
+      await reloadTaxonomy(tid);
+    } catch (err) {
+      if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
+    }
+  };
+
+  document.getElementById("doTaxSearch")?.addEventListener("click", () => runTaxSearch());
+  document.getElementById("taxQuery")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runTaxSearch();
+    }
+  });
 }
 
-async function renderMemory(payload) {
-  actions.innerHTML = btn("Resolve first conflict", "doResolve", "danger");
-  const facts = (payload.facts?.facts || [])
+async function renderCortex(payload) {
+  const snap = payload.snapshot || {};
+  const tenantId = payload.tenantId || snap.tenant_id || "aurora-health";
+  actions.innerHTML =
+    btn("Digest", "doCxDigest") +
+    btn("Recall", "doCxRecall", "secondary") +
+    btn("Sleep", "doCxSleep", "secondary") +
+    btn("Refresh", "doCxRefresh", "secondary");
+
+  const activity = (snap.activity || [])
+    .map((a) => {
+      const when = a.ts ? new Date(a.ts * 1000).toLocaleTimeString() : "";
+      const detail =
+        a.text || a.query || a.subject || a.outcome || a.consolidated || "";
+      return `<tr>
+        <td>${escapeHtml(when)}</td>
+        <td><code>${escapeHtml(a.kind || "")}</code></td>
+        <td>${escapeHtml(String(detail).slice(0, 140))}</td>
+        <td>${escapeHtml(String(a.version ?? a.cache_hit ?? ""))}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const chunks = (snap.chunks || [])
     .map(
-      (f) => `<tr>
-      <td>${f.fact}</td><td>${f.value}</td>
-      <td>${f.status === "active" ? status(true, "active") : status(false, f.status || "superseded")}</td>
+      (c) => `<tr>
+      <td><code>${escapeHtml(c.chunk_ref || c.id || "")}</code></td>
+      <td>${escapeHtml(c.label || c.chunk_text || "")}</td>
+      <td>${escapeHtml(c.band || "")}</td>
+      <td>${escapeHtml(String(c.embedding_dim ?? 0))}</td>
+      <td>${escapeHtml(String(c.confidence ?? ""))}</td>
     </tr>`
     )
     .join("");
-  const conflicts = (payload.conflicts?.conflicts || [])
-    .map((c) => `<tr><td><code>${c.id}</code></td><td>${c.fact}</td><td>${c.old} → ${c.new}</td></tr>`)
+
+  const facts = (snap.facts || [])
+    .map(
+      (f) => `<tr>
+      <td>${escapeHtml(f.fact || `${f.src_label} ${f.relation} ${f.dst_label}`)}</td>
+      <td>${escapeHtml(String(f.weight ?? ""))}</td>
+      <td>${f.current === false ? status(false, "superseded") : status(true, "active")}</td>
+    </tr>`
+    )
+    .join("");
+
+  const superseded = (snap.superseded || [])
+    .slice(0, 8)
+    .map(
+      (f) =>
+        `<tr><td>${escapeHtml(f.fact || "")}</td><td>${escapeHtml(
+          f.valid_to || ""
+        )}</td></tr>`
+    )
+    .join("");
+
+  const conflicts = (snap.conflicts || [])
+    .map(
+      (c) => `<tr>
+      <td>${escapeHtml(c.subject || c.fact || c.id || "")}</td>
+      <td>${escapeHtml(c.relation || "is")}</td>
+      <td>${escapeHtml(String(c.old_value || c.old || ""))} → ${escapeHtml(
+        String(c.new_value || c.new || "")
+      )}</td>
+      <td><button type="button" class="btn secondary cx-resolve" data-subject="${escapeHtml(
+        c.subject || c.fact || ""
+      )}" data-relation="${escapeHtml(c.relation || "is")}" data-new="${escapeHtml(
+        String(c.new_value || c.new || "")
+      )}">Keep new</button></td>
+    </tr>`
+    )
     .join("");
 
   view.innerHTML = `
+    <div class="tax-toolbar surface" style="margin-bottom:1rem;padding:0.85rem 1rem">
+      <div class="tax-toolbar-row">
+        <label>Tenant
+          <select id="cxTenant">
+            <option value="aurora-health" ${tenantId === "aurora-health" ? "selected" : ""}>aurora-health</option>
+            <option value="aurora-pharmacy" ${tenantId === "aurora-pharmacy" ? "selected" : ""}>aurora-pharmacy</option>
+            <option value="default" ${tenantId === "default" ? "selected" : ""}>default</option>
+          </select>
+        </label>
+        <label class="tax-search">Digest text
+          <input id="cxDigest" type="text" placeholder="Medication recon policy is check allergies first." />
+        </label>
+        <label class="tax-search">Recall / explain
+          <input id="cxQuery" type="search" placeholder="What is medication recon policy?" />
+        </label>
+      </div>
+      <div id="cxStatus" class="score-meta" style="margin-top:0.65rem" role="status">
+        Engine <strong>${escapeHtml(snap.engine || "?")}</strong>
+        · version <strong>${escapeHtml(String(snap.version ?? "—"))}</strong>
+        · nodes ${escapeHtml(String(snap.node_count ?? (snap.chunks || []).length))}
+        · facts ${escapeHtml(String(snap.current_fact_count ?? (snap.facts || []).length))}
+        ${snap.demo ? " · fallback" : " · live PrismCortex"}
+      </div>
+    </div>
     <div class="grid-2">
       ${section(
-        "Facts",
-        `<table class="data"><thead><tr><th>Fact</th><th>Value</th><th>Status</th></tr></thead><tbody>${facts}</tbody></table>`,
-        payload.facts?.memory_endpoint || "Cortex",
+        "Activity",
+        `<table class="data"><thead><tr><th>When</th><th>Kind</th><th>Detail</th><th>Meta</th></tr></thead>
+         <tbody>${activity || `<tr><td colspan="4" class="empty">No activity yet — digest a fact</td></tr>`}</tbody></table>`,
+        "MemoryEvent + console",
         0
       )}
       ${section(
-        "Open conflicts",
-        `<table class="data"><thead><tr><th>ID</th><th>Fact</th><th>Change</th></tr></thead><tbody>${
-          conflicts || `<tr><td colspan="3" class="empty">None open</td></tr>`
-        }</tbody></table><div id="cascadePanel" style="margin-top:1rem"></div>`,
-        "Resolve → cascade",
-        60
+        "Memory chunks (graph nodes)",
+        `<table class="data"><thead><tr><th>Ref</th><th>Label</th><th>Band</th><th>Embed</th><th>Conf</th></tr></thead>
+         <tbody>${chunks || `<tr><td colspan="5" class="empty">No chunks</td></tr>`}</tbody></table>`,
+        "bitemporal",
+        40
+      )}
+    </div>
+    <div class="grid-2">
+      ${section(
+        "Current facts",
+        `<table class="data"><thead><tr><th>Fact</th><th>Weight</th><th>State</th></tr></thead>
+         <tbody>${facts || `<tr><td colspan="3" class="empty">No facts</td></tr>`}</tbody></table>
+         ${
+           superseded
+             ? `<p class="score-meta" style="margin-top:0.75rem">Superseded</p>
+                <table class="data"><thead><tr><th>Fact</th><th>Valid to</th></tr></thead><tbody>${superseded}</tbody></table>`
+             : ""
+         }`,
+        "edges",
+        80
+      )}
+      ${section(
+        "Conflicts",
+        `<table class="data"><thead><tr><th>Subject</th><th>Rel</th><th>Change</th><th></th></tr></thead>
+         <tbody>${conflicts || `<tr><td colspan="4" class="empty">None open</td></tr>`}</tbody></table>
+         <div id="cxCascade" style="margin-top:0.75rem"></div>
+         <div id="cxRecallOut" class="surface" style="margin-top:0.75rem;padding:0.75rem" hidden></div>`,
+        "resolve → cascade",
+        100
       )}
     </div>
   `;
 
-  document.getElementById("doResolve").onclick = async () => {
-    const c = payload.conflicts?.conflicts?.[0];
-    const panel = document.getElementById("cascadePanel");
-    if (!c) {
-      panel.innerHTML = `<p class="empty">No conflict to resolve</p>`;
-      return;
+  async function reloadCortex(nextTenant) {
+    const tid = nextTenant || document.getElementById("cxTenant")?.value || tenantId;
+    const snapshot = await soft(
+      `/api/v1/cortex/snapshot?tenant_id=${encodeURIComponent(tid)}`,
+      { activity: [], chunks: [], facts: [], conflicts: [], engine: "null" }
+    );
+    const next = { snapshot, tenantId: tid };
+    lastRender = () => renderCortex(next);
+    await renderCortex(next);
+  }
+
+  document.getElementById("cxTenant")?.addEventListener("change", async (e) => {
+    await reloadCortex(e.target.value);
+  });
+  document.getElementById("doCxRefresh")?.addEventListener("click", () => reloadCortex());
+
+  document.getElementById("doCxDigest")?.addEventListener("click", async () => {
+    const statusEl = document.getElementById("cxStatus");
+    const tid = document.getElementById("cxTenant")?.value || tenantId;
+    const text = document.getElementById("cxDigest")?.value || "";
+    try {
+      if (statusEl) statusEl.textContent = "Digesting…";
+      const r = await j("/api/v1/cortex/digest", {
+        method: "POST",
+        body: JSON.stringify({ tenant_id: tid, text }),
+      });
+      if (out) out.textContent = JSON.stringify(r, null, 2);
+      await reloadCortex(tid);
+    } catch (err) {
+      if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
     }
-    const r = await j("/api/v1/memory/conflicts/" + c.id + "/resolve", {
-      method: "POST",
-      body: JSON.stringify({ tenant_id: "default", resolution: { keep: "new" } }),
+  });
+
+  document.getElementById("doCxRecall")?.addEventListener("click", async () => {
+    const statusEl = document.getElementById("cxStatus");
+    const panel = document.getElementById("cxRecallOut");
+    const tid = document.getElementById("cxTenant")?.value || tenantId;
+    const query = document.getElementById("cxQuery")?.value || "";
+    try {
+      const [rec, exp] = await Promise.all([
+        j("/api/v1/cortex/recall", {
+          method: "POST",
+          body: JSON.stringify({ tenant_id: tid, query }),
+        }),
+        j("/api/v1/cortex/explain", {
+          method: "POST",
+          body: JSON.stringify({ tenant_id: tid, query }),
+        }),
+      ]);
+      if (out) out.textContent = JSON.stringify({ recall: rec, explain: exp }, null, 2);
+      if (panel) {
+        panel.hidden = false;
+        const ev = (exp.evidence || [])
+          .map((e) => `<li>${escapeHtml(e.fact || "")} <span class="hint">conf ${escapeHtml(
+            String(e.confidence ?? "")
+          )}</span></li>`)
+          .join("");
+        panel.innerHTML = `<strong>Recall</strong>
+          <p>${escapeHtml(rec.answer || "")}</p>
+          <p class="score-meta">cache=${escapeHtml(String(rec.cache_hit))} · conf=${escapeHtml(
+            String(rec.confidence)
+          )} · v${escapeHtml(String(rec.version))}</p>
+          <strong>Explain evidence</strong>
+          <ul style="margin:0.4rem 0 0;padding-left:1.1rem">${ev || "<li class='empty'>none</li>"}</ul>`;
+      }
+      if (statusEl) {
+        statusEl.innerHTML = `Recall ${status(true, "ok")} · cache_hit=${escapeHtml(
+          String(rec.cache_hit)
+        )}`;
+      }
+      // refresh activity without full wipe of recall panel content after short delay
+      const snap = await soft(
+        `/api/v1/cortex/snapshot?tenant_id=${encodeURIComponent(tid)}`,
+        {}
+      );
+      payload.snapshot = snap;
+    } catch (err) {
+      if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
+    }
+  });
+
+  document.getElementById("doCxSleep")?.addEventListener("click", async () => {
+    const statusEl = document.getElementById("cxStatus");
+    const tid = document.getElementById("cxTenant")?.value || tenantId;
+    try {
+      const r = await j("/api/v1/cortex/sleep", {
+        method: "POST",
+        body: JSON.stringify({ tenant_id: tid }),
+      });
+      if (out) out.textContent = JSON.stringify(r, null, 2);
+      await reloadCortex(tid);
+      if (statusEl) {
+        statusEl.innerHTML = `Sleep ${status(true, "ok")} · consolidated ${escapeHtml(
+          String(r.consolidated ?? 0)
+        )}`;
+      }
+    } catch (err) {
+      if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
+    }
+  });
+
+  document.querySelectorAll(".cx-resolve").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const tid = document.getElementById("cxTenant")?.value || tenantId;
+      const panel = document.getElementById("cxCascade");
+      try {
+        const r = await j("/api/v1/cortex/conflicts/resolve", {
+          method: "POST",
+          body: JSON.stringify({
+            tenant_id: tid,
+            subject: b.getAttribute("data-subject"),
+            relation: b.getAttribute("data-relation") || "is",
+            chosen_value: b.getAttribute("data-new"),
+          }),
+        });
+        if (panel) {
+          panel.innerHTML = `<div class="surface" style="padding:0.75rem">
+            <div class="section-head"><h2 style="font-size:0.95rem;margin:0">Cascade</h2>${status(
+              true,
+              "queued"
+            )}</div>
+            <code>${escapeHtml(r.cascade?.cascade_id || "")}</code>
+          </div>`;
+        }
+        await reloadCortex(tid);
+      } catch (err) {
+        if (panel) panel.innerHTML = `<p class="err">${escapeHtml(err.message || err)}</p>`;
+      }
     });
-    panel.innerHTML = `<div class="surface">
-      <div class="section-head"><h2 style="font-size:0.95rem">Cascade started</h2>${status(true, "queued")}</div>
-      <code>${r.cascade?.cascade_id || ""}</code>
-    </div>`;
-  };
+  });
+}
+
+async function renderMemory(payload) {
+  // Back-compat if anything still calls memory — redirect render to Cortex shape
+  return renderCortex({
+    snapshot: {
+      facts: (payload.facts?.facts || []).map((f) => ({
+        fact: `${f.fact} is ${f.value}`,
+        current: f.status === "active",
+        weight: 1,
+      })),
+      conflicts: payload.conflicts?.conflicts || [],
+      activity: [],
+      chunks: [],
+      engine: "null",
+      demo: true,
+    },
+    tenantId: "default",
+  });
 }
 
 async function renderGuard(payload) {
@@ -862,7 +1476,10 @@ async function renderGuard(payload) {
 }
 
 async function renderAdmin(payload) {
-  actions.innerHTML = btn("Create join token", "mkToken") + btn("SOC2 export", "soc2", "secondary");
+  actions.innerHTML =
+    btn("Create join token", "mkToken") +
+    btn("Compliance scan", "cmpScan", "secondary") +
+    btn("SOC2 export", "soc2", "secondary");
   const lic = payload.license || {};
   const doctor = payload.doctor || {};
   const auth = payload.auth || {};
@@ -871,6 +1488,9 @@ async function renderAdmin(payload) {
   const pins = (doctor.pins?.pins || []).slice(0, 8);
   const pg = doctor.postgres;
   const pgLabel = !pg ? "not configured" : pg.ok ? "connected" : "error";
+  const incidents = payload.incidents?.incidents || [];
+  const findings = payload.findings?.findings || [];
+  const ep = payload.enterprise?.policies || [];
 
   view.innerHTML = `
     <div class="grid-2">
@@ -882,6 +1502,13 @@ async function renderAdmin(payload) {
          <p class="score-meta">${lic.message || ""}</p>
          <p class="score-meta">Grace remaining: ${lic.grace_remaining_seconds ?? "n/a"}s</p>
          <p style="margin-top:0.85rem"><a class="rail-support" href="${lic.portal_url || "#"}" target="_blank" rel="noreferrer">Open renewal portal</a></p>
+         <p class="score-meta" style="margin-top:0.5rem">Online check: ${
+           lic.online_check?.enabled
+             ? `every ${lic.online_check.interval_days || 14}d · last ${
+                 lic.online_check.last?.status || lic.online_check.last?.last_error || "not run"
+               }`
+             : "disabled (air-gap / demo)"
+         }</p>
          <table class="data" style="margin-top:1rem"><tbody>
            <tr><td>Tier</td><td>${lic.claims?.tier || "—"}</td></tr>
            <tr><td>Max nodes</td><td>${lic.claims?.max_nodes ?? "—"}</td></tr>
@@ -890,8 +1517,12 @@ async function renderAdmin(payload) {
          <div class="field" style="margin-top:1rem"><label>Install license key</label>
            <textarea id="licKey" rows="3" placeholder="Paste license JWT" style="width:100%;font-family:var(--font-mono);font-size:0.75rem"></textarea>
          </div>
-         <p style="margin-top:0.5rem">${btn("Install license", "installLic", "secondary")}</p>`,
-        "Offline verify",
+         <p style="margin-top:0.5rem">${btn("Install license", "installLic", "secondary")} ${btn(
+           "Online check",
+           "onlineLic",
+           "secondary"
+         )}</p>`,
+        "Offline verify + optional Side 1",
         0
       )}
       ${section(
@@ -1001,6 +1632,43 @@ async function renderAdmin(payload) {
         150
       )}
     </div>
+    <div class="grid-2">
+      ${section(
+        "Incidents",
+        `<table class="data"><thead><tr><th>Title</th><th>State</th><th>Assets</th></tr></thead><tbody>${
+          incidents
+            .slice(0, 10)
+            .map(
+              (i) =>
+                `<tr><td>${escapeHtml(i.title || "")}</td><td>${escapeHtml(
+                  i.state
+                )}</td><td>${(i.assets || []).length}</td></tr>`
+            )
+            .join("") || `<tr><td colspan="3" class="empty">None</td></tr>`
+        }</tbody></table>`,
+        "Intelligence API",
+        160
+      )}
+      ${section(
+        "Compliance findings",
+        `<table class="data"><thead><tr><th>Sev</th><th>Code</th><th>Title</th></tr></thead><tbody>${
+          findings
+            .slice(0, 10)
+            .map(
+              (f) =>
+                `<tr><td>${escapeHtml(f.severity)}</td><td><code>${escapeHtml(
+                  f.code
+                )}</code></td><td>${escapeHtml(f.title)}</td></tr>`
+            )
+            .join("") || `<tr><td colspan="3" class="empty">Run Compliance scan</td></tr>`
+        }</tbody></table>
+         <p class="score-meta" style="margin-top:0.5rem">Automated posture — not a SOC2 attestation. Enterprise policies: ${
+           ep.length
+         }</p>`,
+        "Trust packaging",
+        170
+      )}
+    </div>
   `;
 
   document.getElementById("mkToken").onclick = async () => {
@@ -1010,6 +1678,14 @@ async function renderAdmin(payload) {
     });
     document.getElementById("tokenOut").textContent = r.join_token;
   };
+  const cmpScan = document.getElementById("cmpScan");
+  if (cmpScan) {
+    cmpScan.onclick = async () => {
+      const r = await j("/api/v1/compliance/scan", { method: "POST", body: "{}" });
+      out.textContent = JSON.stringify(r, null, 2);
+      load();
+    };
+  }
   document.getElementById("soc2").onclick = async () => {
     const r = await fetch("/api/v1/admin/soc2-export", { headers });
     const blob = await r.blob();
@@ -1028,6 +1704,18 @@ async function renderAdmin(payload) {
         body: JSON.stringify({ license_key: key }),
       });
       appendChat("bot", `License installed: ${r.state}`);
+      load();
+    };
+  }
+  const onlineBtn = document.getElementById("onlineLic");
+  if (onlineBtn) {
+    onlineBtn.onclick = async () => {
+      const r = await j("/api/v1/admin/license/online-check", { method: "POST", body: "{}" });
+      out.textContent = JSON.stringify(r, null, 2);
+      appendChat(
+        "bot",
+        `Side 1 online check: ${r.check?.result?.status || r.check?.reason || r.check?.error || r.license?.state}`
+      );
       load();
     };
   }
@@ -1082,7 +1770,7 @@ async function load() {
           } catch (__) {}
         }
       }
-      const [matrix, caps, fleet, drift, score, tax, driver, dogfood, pipelines] =
+      const [matrix, caps, fleet, drift, score, tax, driver, dogfood, pipelines, incidents, findings, versionDiff] =
         await Promise.all([
           soft("/api/v1/health/matrix", {}),
           soft("/api/v1/health/caps", {}),
@@ -1098,8 +1786,24 @@ async function load() {
             graph: { nodes: [], edges: [] },
             cascade: null,
           }),
+          soft("/api/v1/incidents", { incidents: [] }),
+          soft("/api/v1/compliance/findings", { findings: [] }),
+          soft("/api/v1/fleet/version-diff?tenant_id=default", {}),
         ]);
-      payload = { matrix, caps, fleet, drift, score, tax, driver, dogfood, pipelines };
+      payload = {
+        matrix,
+        caps,
+        fleet,
+        drift,
+        score,
+        tax,
+        driver,
+        dogfood,
+        pipelines,
+        incidents,
+        findings,
+        versionDiff,
+      };
       if (payload.caps?.guard?.demo || payload.tax?.demo || payload.score?.demo) {
         document.getElementById("demoBanner").hidden = false;
       }
@@ -1115,22 +1819,37 @@ async function load() {
       lastRender = () => renderTrace(payload);
       await renderTrace(payload);
     } else if (tab === "taxonomy") {
+      let taxTenant = "default";
+      try {
+        const tenants = await soft("/api/v1/admin/tenants", { tenants: [] });
+        const ids = (tenants.tenants || []).map((t) => t.tenant_id || t.id).filter(Boolean);
+        if (ids.includes("aurora-health")) taxTenant = "aurora-health";
+        else if (ids[0]) taxTenant = ids[0];
+      } catch (_) {}
+      const q = `tenant_id=${encodeURIComponent(taxTenant)}`;
       const [tree, partitions, health] = await Promise.all([
-        soft("/api/v1/taxonomy/tree", { categories: [] }),
-        soft("/api/v1/taxonomy/partitions", { partitions: [] }),
-        soft("/api/v1/taxonomy/chunks/health", { decay: [] }),
+        soft(`/api/v1/taxonomy/tree?${q}`, { categories: [] }),
+        soft(`/api/v1/taxonomy/partitions?${q}`, { partitions: [] }),
+        soft(`/api/v1/taxonomy/chunks/health?${q}`, { decay: [] }),
       ]);
-      payload = { tree, partitions, health };
+      payload = { tree, partitions, health, tenantId: taxTenant };
       lastRender = () => renderTaxonomy(payload);
       await renderTaxonomy(payload);
-    } else if (tab === "memory") {
-      const [facts, conflicts] = await Promise.all([
-        soft("/api/v1/memory/facts", { facts: [] }),
-        soft("/api/v1/memory/conflicts", { conflicts: [] }),
-      ]);
-      payload = { facts, conflicts };
-      lastRender = () => renderMemory(payload);
-      await renderMemory(payload);
+    } else if (tab === "cortex" || tab === "memory") {
+      let cxTenant = "default";
+      try {
+        const tenants = await soft("/api/v1/admin/tenants", { tenants: [] });
+        const ids = (tenants.tenants || []).map((t) => t.tenant_id || t.id).filter(Boolean);
+        if (ids.includes("aurora-health")) cxTenant = "aurora-health";
+        else if (ids[0]) cxTenant = ids[0];
+      } catch (_) {}
+      const snapshot = await soft(
+        `/api/v1/cortex/snapshot?tenant_id=${encodeURIComponent(cxTenant)}`,
+        { activity: [], chunks: [], facts: [], conflicts: [], engine: "null", demo: true }
+      );
+      payload = { snapshot, tenantId: cxTenant };
+      lastRender = () => renderCortex(payload);
+      await renderCortex(payload);
     } else if (tab === "guard") {
       const [policy, logs] = await Promise.all([
         soft("/api/v1/guard/policy", { policy: {} }),
@@ -1140,15 +1859,30 @@ async function load() {
       lastRender = () => renderGuard(payload);
       await renderGuard(payload);
     } else if (tab === "admin") {
-      const [doctor, graph, auth, recommendations, stack, tenants] = await Promise.all([
-        soft("/api/v1/admin/doctor", {}),
-        soft("/api/v1/graph", { assets: [], edges: [] }),
-        soft("/api/v1/admin/auth", { local_token: true, oidc_enabled: false }),
-        soft("/api/v1/recommendations", { recommendations: [], predictive: false, samples: 0 }),
-        soft("/api/v1/admin/stack-licenses", { products: {} }),
-        soft("/api/v1/admin/tenants", { tenants: [] }),
-      ]);
-      payload = { license: lic, doctor, graph, auth, recommendations, stack, tenants };
+      const [doctor, graph, auth, recommendations, stack, tenants, incidents, findings, enterprise] =
+        await Promise.all([
+          soft("/api/v1/admin/doctor", {}),
+          soft("/api/v1/graph", { assets: [], edges: [] }),
+          soft("/api/v1/admin/auth", { local_token: true, oidc_enabled: false }),
+          soft("/api/v1/recommendations", { recommendations: [], predictive: false, samples: 0 }),
+          soft("/api/v1/admin/stack-licenses", { products: {} }),
+          soft("/api/v1/admin/tenants", { tenants: [] }),
+          soft("/api/v1/incidents", { incidents: [] }),
+          soft("/api/v1/compliance/findings", { findings: [] }),
+          soft("/api/v1/enterprise/policies", { policies: [] }),
+        ]);
+      payload = {
+        license: lic,
+        doctor,
+        graph,
+        auth,
+        recommendations,
+        stack,
+        tenants,
+        incidents,
+        findings,
+        enterprise,
+      };
       lastRender = () => renderAdmin(payload);
       await renderAdmin(payload);
     }
@@ -1160,7 +1894,7 @@ async function load() {
       setChatOpen(true);
       appendChat(
         "bot",
-        "Welcome — I am the Ops Assistant. Ask about pipelines, fleet, AI Score, or policy drift. Destructive actions need confirmation."
+        "Welcome — Ops Assistant runs Guard → ChorusGraph → Shine on your question, then answers from live Overview telemetry (no world-truth). Pick Light or Dark in the rail. Try “Explain scores” or “What does the clinical agent do?”."
       );
     }
   } catch (e) {

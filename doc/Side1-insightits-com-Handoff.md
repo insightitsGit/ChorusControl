@@ -2,11 +2,10 @@
 
 | Field | Value |
 |-------|-------|
-| Audience | Future Cursor / engineering agent working on **www.insightits.com** |
-| Status | Deferred — do **not** implement in the ChorusControl repo; **hand to website/Side 1 agent** |
-| Owner (today) | ChorusControl team defines the **contract**; website team implements later |
-| Companion | [ChorusControl-Design-Gaps-and-Solutions.md](./ChorusControl-Design-Gaps-and-Solutions.md) · [ChorusControl-COMPLETE-DESIGN.md](./ChorusControl-COMPLETE-DESIGN.md) |
-| Version | 1.1.0 |
+| Audience | Website / Side 1 agent **and** Side 2 ChorusControl |
+| Status | Contract live in Side 1 code; prod Azure routes may lag deploy |
+| Companion | InsightitsAIAgent `docs/CHORUSCONTROL_SIDE1_LICENSE.md` · [ChorusControl-COMPLETE-DESIGN.md](./ChorusControl-COMPLETE-DESIGN.md) |
+| Version | 1.2.0 |
 | Date | July 2026 |
 
 ---
@@ -15,52 +14,46 @@
 
 **ChorusControl** is the self-hosted **Enterprise AI Operating System / AI Operations Platform** (Side 2). **www.insightits.com** is the commercial portal (Side 1).
 
-ChorusControl is a **two-sided** product family:
-
 | Side | Repo / surface | Responsibility |
 |------|----------------|----------------|
-| **Side 2** | `ChorusControl` (this project) | Self-hosted **AI Operations Platform** — mother + agents in customer VPC |
-| **Side 1** | **www.insightits.com** (separate) | Commercial portal: sell, support, and **issue** offline licenses |
+| **Side 2** | `ChorusControl` (this project) | Self-hosted AI Ops Platform — mother + agents in customer VPC |
+| **Side 1** | **www.insightits.com** (separate) | Commercial portal: sell, support, **issue** offline licenses, optional online validate |
 
-Side 2 is built **now** in this folder. Side 1 is a **future handoff** to the insightits.com agent. The two sides must agree on a stable interface so license keys issued on the website validate offline inside ChorusControl with **zero phone-home**.
-
----
-
-## 2. What the insightits.com agent will build (later)
-
-When handed this brief, implement on the **website / portal** stack (not inside ChorusControl):
-
-1. **Customer accounts** — org identity tied to `sub` / customer id in license claims.
-2. **Stripe billing** — plans mapped to ChorusControl `tier` and feature entitlements.
-3. **License issuance** — Ed25519-signed offline JWT (or compact JWS) matching the claim schema below; private key stays on Side 1 only.
-4. **License delivery UX** — customer can copy/download the key to paste into ChorusControl Admin → License.
-5. **Support ticketing** — hosted tickets; ChorusControl only deep-links here.
-6. **Optional** — license history, renewals, seat/node upgrades that re-issue JWTs with updated `max_nodes` / `exp` / `features`.
-
-**Do not** implement: Prism fleet control, Cortex sleep, RAG taxonomy UI, Guard WAF console, or audit sinks. Those belong exclusively to Side 2.
+Side 2 verifies licenses **offline first** (Ed25519). Connected installs **optionally** re-check Side 1 about every **14 days** for revocation. Air-gap never requires that call.
 
 ---
 
-## 3. Stable contract Side 2 already depends on
+## 2. What Side 1 provides
 
-The ChorusControl product will verify licenses using this contract. Side 1 **must** issue keys that satisfy it.
+1. Customer accounts / org identity (`sub`)
+2. Stripe billing → `tier` / features / `max_nodes`
+3. Ed25519-signed offline JWT (private key stays on Side 1)
+4. License delivery UX (copy / download)
+5. Support ticketing
+6. **Optional online APIs** (below)
 
-### 3.1 Environment / UX touchpoints on Side 2
+**Do not** implement Prism fleet control, Cortex, RAG taxonomy, Guard WAF, or audit sinks on Side 1.
 
-| Touchpoint | Side 2 behavior | Side 1 must provide |
-|------------|-----------------|---------------------|
-| License key | Customer pastes into Admin or sets `CHORUSCONTROL_LICENSE_KEY` | Issuance + download/copy UI |
-| Support link | `INSIGHTITS_SUPPORT_URL` (default `https://www.insightits.com/support`) | Working support entry URL |
-| Account / billing link (optional) | Configurable portal URL | Customer billing page |
+---
 
-### 3.2 Cryptography
+## 3. Stable contract
 
-- Algorithm: **Ed25519**
-- Side 1 holds the **private** signing key (HSM or secrets manager recommended).
-- Side 2 embeds / ships the matching **public** key (via `chorusmesh.license` or equivalent adapter).
-- Validation is **100% offline** — no callback to insightits.com at verify time.
+### 3.1 Touchpoints
 
-### 3.3 License claims schema (must match Side 2)
+| Touchpoint | Side 2 | Side 1 |
+|------------|--------|--------|
+| License key | Paste Admin / `CHORUSCONTROL_LICENSE_KEY` | Issue + download |
+| Support | `INSIGHTITS_SUPPORT_URL` | `/support` |
+| Portal | `INSIGHTITS_PORTAL_URL` | Dashboard / billing |
+| Side 1 API base | `CHORUSCONTROL_SIDE1_API_BASE_URL` (optional; default portal) | Local `http://127.0.0.1:5000` |
+
+### 3.2 Cryptography (primary)
+
+- Algorithm: **Ed25519 / EdDSA**
+- Side 1 holds private key; Side 2 embeds public key
+- **Offline verify is required** — air-gap works with zero network
+
+### 3.3 Claims schema
 
 ```json
 {
@@ -76,73 +69,80 @@ The ChorusControl product will verify licenses using this contract. Side 1 **mus
 }
 ```
 
-| Claim | Rules |
-|-------|--------|
-| `iss` | Constant issuer string Side 2 expects (`insightits.com`) |
-| `sub` | Stable customer/org id |
-| `exp` | Unix seconds; Side 2 fail-closes when expired |
-| `tier` | One of `starter` \| `enterprise` \| `sovereign` |
-| `max_nodes` | Enforced against Fabric peer / worker registration |
-| `max_tenants` | Enforced on tenant create in ChorusControl |
-| `features` | Feature flags; unknown flags ignored by older Side 2 builds |
-| `license_id` | Unique id for support / revocation *records on Side 1* (Side 2 does not phone home to revoke) |
+Default license length ~**90 days** (or Stripe period). Side 2 **14-day read-only grace** after `exp` (±24h clock skew).
 
-**Revocation note:** True online revocation requires phone-home or short `exp` + re-issue. Prefer short-lived renewals or documented air-gap policy; do not assume Side 2 can check a CRL at runtime.
+### 3.3a Two meanings of “14 days”
 
-### 3.3a Grace window (Side 2 — R02)
+| Meaning | Behavior |
+|---------|----------|
+| **Grace after `exp`** | Read-only mutations blocked; observe stays up |
+| **Online re-check interval** | Connected mothers SHOULD call Side 1 validate ~every 14 days for revocation |
 
-Side 2 applies a **grace window** after `exp` (default **14 days**):
+### 3.3b Online validate (optional — not a separate “14-day license URL”)
 
-- Platform stays up for **read** (observe fleet, caps, traces).
-- **Mutations blocked** (policy, cascade, jobs, command dispatch).
-- Loud UI banner; renew via Side 1 portal / deep link.
-- Clock skew tolerance **±24 hours** on `exp`/`iat`.
+| Purpose | Method | Prod URL | Local |
+|---------|--------|----------|-------|
+| Public key + interval contract | `GET` | `https://www.insightits.com/api/choruscontrol/public-key` | `http://127.0.0.1:5000/api/choruscontrol/public-key` |
+| Online validate / revoke status | `POST` | `https://www.insightits.com/api/choruscontrol/validate` | `http://127.0.0.1:5000/api/choruscontrol/validate` |
 
-Side 1 renewal UX should warn customers before grace ends and support short-`exp` re-issue for air-gap.
+Validate body:
 
-### 3.4 Tier → feature mapping (recommended default)
+```json
+{
+  "licenseKey": "<CHORUSCONTROL_LICENSE_KEY>",
+  "instanceId": "optional-stable-node-id",
+  "productVersion": "1.2.0"
+}
+```
 
-| Tier | Suggested features |
-|------|--------------------|
+Side 2 guidance:
+
+- Network failure → **keep last offline verdict** until `exp` + grace
+- `status=revoked` → **fail closed** even if JWT still verifies
+- `phoneHomeRequired` is always `false`; `offlineOk` always `true`
+- Disable: `CHORUSCONTROL_LICENSE_ONLINE_CHECK=0`
+- Force from UI/API: `POST /api/v1/admin/license/online-check`
+
+### 3.4 Tier → features
+
+| Tier | Features |
+|------|----------|
 | `starter` | Core UI, sleep, basic taxonomy |
 | `enterprise` | + `trace.replay`, `guard.shadow`, `audit.export` |
-| `sovereign` | All enterprise + air-gap support SLAs (commercial only) |
-
-Side 1 billing products should map 1:1 to these tiers so Stripe plan changes produce correct JWTs.
+| `sovereign` | Enterprise + air-gap SLA (commercial) |
 
 ---
 
-## 4. What Side 2 delivers before handoff
+## 4. Side 2 implementation (this repo)
 
-The ChorusControl repo will ship:
-
-- Offline verifier + middleware (fail-closed).
-- Admin license status / upload UI.
-- Deep link to support URL.
-- Dev/test keypair workflow so Side 2 can be QA’d **before** the website issues production keys.
-- This handoff brief kept in sync when claim schema changes (version bump + changelog entry).
+- Offline verifier + middleware (fail-closed / grace)
+- Admin license status / upload + **online_check** block
+- Periodic sampler tick (~14d) + install-time check
+- Air-gap safe when online check disabled or Side 1 unreachable
 
 ---
 
-## 5. Handoff checklist (when website work starts)
+## 5. E2E test (local)
 
-- [ ] Confirm Ed25519 key ceremony; publish public key into `chorusmesh.license` / Side 2 release.
-- [ ] Implement issuer producing the claim schema in §3.3.
-- [ ] Map Stripe products → `tier` / `max_nodes` / `features`.
-- [ ] Customer “copy license key” UX.
-- [ ] Support URL live at the configured default (or update Side 2 default).
-- [ ] Cross-team test: key issued on insightits.com validates in ChorusControl with network disabled.
-- [ ] Document renewal / upgrade re-issue flow for customers.
+1. Start Side 1: `meeting-scheduler` → `python app.py` (:5000) with local Ed25519 hex env
+2. Login `superadmin@insightits.com` / `superadmin12345` → issue ChorusControl JWT
+3. Start Side 2 with that JWT as `CHORUSCONTROL_LICENSE_KEY` and:
+   - `CHORUSCONTROL_SIDE1_API_BASE_URL=http://127.0.0.1:5000`
+   - `CHORUSCONTROL_LICENSE_ONLINE_CHECK=1`
+   - `CHORUSCONTROL_DEMO_MODE=0` (or `CHORUSCONTROL_LICENSE_ONLINE_CHECK_IN_DEMO=1`)
+4. `POST /api/v1/admin/license/online-check` or curl Side 1 `/validate` directly
+
+**Note:** Prod `GET …/public-key` may 404 until Side 1 Azure deploy; local Side 1 must be running for live E2E.
 
 ---
 
 ## 6. Non-goals / anti-patterns
 
-- Do not put Stripe or ticket DB code into the ChorusControl container.
-- Do not require ChorusControl to call insightits.com APIs to start.
-- Do not change claim field names without a coordinated Side 2 version bump.
-- Do not embed the **private** signing key in Side 2 images or this repo.
+- Do not put Stripe or ticket DB in ChorusControl
+- Do not **require** Side 1 online to start mother
+- Do not rename claims without coordinated version bump
+- Do not embed Side 1 **private** signing key in Side 2
 
 ---
 
-*Insight IT Solutions LLC — Side 1 handoff brief for www.insightits.com*
+*Insight IT Solutions LLC — Side 1 handoff brief v1.2.0*

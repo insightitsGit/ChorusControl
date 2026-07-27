@@ -10,8 +10,23 @@ from choruscontrol.persistence import Store
 
 
 class FleetRegistry:
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: Store, postgres: Any | None = None) -> None:
         self.store = store
+        self.postgres = postgres
+
+    async def _mirror_token(self, token: str) -> None:
+        if not self.postgres or not getattr(self.postgres, "control_plane", False):
+            return
+        row = await self.store.fetchone("SELECT * FROM join_tokens WHERE token=?", (token,))
+        if row:
+            await self.postgres.upsert_join_token(dict(row))
+
+    async def _mirror_node(self, node_id: str) -> None:
+        if not self.postgres or not getattr(self.postgres, "control_plane", False):
+            return
+        row = await self.store.fetchone("SELECT * FROM nodes WHERE node_id=?", (node_id,))
+        if row:
+            await self.postgres.upsert_node(dict(row))
 
     async def create_join_token(
         self,
@@ -27,6 +42,7 @@ class FleetRegistry:
             "VALUES(?,?,?,?,?,?,?)",
             (token, max_uses, 0, time.time() + ttl_seconds, zone, node_id_bind, time.time()),
         )
+        await self._mirror_token(token)
         return token
 
     async def join(
@@ -86,6 +102,8 @@ class FleetRegistry:
         await self.store.execute(
             "UPDATE join_tokens SET uses = uses + 1 WHERE token=?", (join_token,)
         )
+        await self._mirror_token(join_token)
+        await self._mirror_node(nid)
         return {"node_id": nid, "session_secret": session_secret}
 
     async def heartbeat(
@@ -96,6 +114,7 @@ class FleetRegistry:
         products: dict[str, str],
         caps_digest: str | None,
         role: str | None = None,
+        memory_endpoint: str | None = None,
     ) -> None:
         row = await self.store.fetchone("SELECT * FROM nodes WHERE node_id=?", (node_id,))
         if not row or row["revoked"]:
@@ -103,16 +122,24 @@ class FleetRegistry:
         if row["session_secret"] != session_secret:
             raise ValueError("invalid session")
         day = time.strftime("%Y-%m-%d", time.gmtime())
-        await self.store.execute(
-            "UPDATE nodes SET products_json=?, caps_digest=?, last_seen=?, role=COALESCE(?, role) WHERE node_id=?",
-            (json.dumps(products), caps_digest, time.time(), role, node_id),
-        )
+        if memory_endpoint is not None:
+            await self.store.execute(
+                "UPDATE nodes SET products_json=?, caps_digest=?, last_seen=?, "
+                "role=COALESCE(?, role), memory_endpoint=? WHERE node_id=?",
+                (json.dumps(products), caps_digest, time.time(), role, memory_endpoint, node_id),
+            )
+        else:
+            await self.store.execute(
+                "UPDATE nodes SET products_json=?, caps_digest=?, last_seen=?, role=COALESCE(?, role) WHERE node_id=?",
+                (json.dumps(products), caps_digest, time.time(), role, node_id),
+            )
         await self.store.execute(
             "INSERT INTO version_snapshots(node_id, day, products_json, caps_digest) VALUES(?,?,?,?) "
             "ON CONFLICT(node_id, day) DO UPDATE SET products_json=excluded.products_json, "
             "caps_digest=excluded.caps_digest",
             (node_id, day, json.dumps(products), caps_digest),
         )
+        await self._mirror_node(node_id)
 
     async def list_nodes(self) -> list[dict[str, Any]]:
         rows = await self.store.fetchall("SELECT * FROM nodes WHERE revoked=0 ORDER BY last_seen DESC")
@@ -129,21 +156,23 @@ class FleetRegistry:
 
     async def revoke(self, node_id: str) -> None:
         await self.store.execute("UPDATE nodes SET revoked=1 WHERE node_id=?", (node_id,))
+        await self._mirror_node(node_id)
 
     async def memory_endpoint_for_tenant(self, tenant_id: str) -> str | None:
         row = await self.store.fetchone(
             "SELECT memory_endpoint, node_id, role FROM nodes WHERE tenant_id=? AND revoked=0 "
-            "AND memory_endpoint IS NOT NULL ORDER BY CASE WHEN role='memory' THEN 0 ELSE 1 END, last_seen DESC",
+            "AND memory_endpoint IS NOT NULL AND memory_endpoint != '' "
+            "ORDER BY CASE WHEN lower(role) IN ('memory','cortex') THEN 0 ELSE 1 END, last_seen DESC",
             (tenant_id,),
         )
         if not row:
-            # prefer any memory role
             row = await self.store.fetchone(
-                "SELECT node_id FROM nodes WHERE tenant_id=? AND role='memory' AND revoked=0",
+                "SELECT node_id FROM nodes WHERE tenant_id=? AND lower(role) IN ('memory','cortex') "
+                "AND revoked=0",
                 (tenant_id,),
             )
-            return f"node://{row['node_id']}" if row else None
-        return row["memory_endpoint"] or f"node://{row['node_id']}"
+            return f"local://{row['node_id']}" if row else None
+        return row["memory_endpoint"] or f"local://{row['node_id']}"
 
     def features_for_products(self, products: dict[str, str]) -> set[str]:
         """R07 version negotiation."""

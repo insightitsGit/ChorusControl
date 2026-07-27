@@ -45,11 +45,20 @@ class CascadeService:
         broadcaster: InvalidationBroadcaster,
         cache: CachePort,
         mark_revalidate,
+        postgres: Any | None = None,
     ) -> None:
         self.store = store
         self.broadcaster = broadcaster
         self.cache = cache
         self.mark_revalidate = mark_revalidate
+        self.postgres = postgres
+
+    async def _mirror_cascade(self, cascade_id: str) -> None:
+        if not self.postgres or not getattr(self.postgres, "control_plane", False):
+            return
+        row = await self.store.fetchone("SELECT * FROM cascades WHERE cascade_id=?", (cascade_id,))
+        if row:
+            await self.postgres.upsert_cascade(dict(row))
 
     async def run(
         self,
@@ -87,13 +96,17 @@ class CascadeService:
             "UPDATE cascades SET state=?, details_json=?, updated_at=? WHERE cascade_id=?",
             ("completed", json.dumps(details), time.time(), cascade_id),
         )
-        return {"cascade_id": cascade_id, "details": details, "broadcast": payload}
+        await self._mirror_cascade(cascade_id)
+        return {"cascade_id": cascade_id, "details": details, "broadcast": payload, "tags": tags}
 
     async def record_ack(self, cascade_id: str, node_id: str, status: str = "ok") -> None:
+        now = time.time()
         await self.store.execute(
             "INSERT OR REPLACE INTO cascade_acks(cascade_id, node_id, status, received_at) VALUES(?,?,?,?)",
-            (cascade_id, node_id, status, time.time()),
+            (cascade_id, node_id, status, now),
         )
+        if self.postgres and getattr(self.postgres, "control_plane", False):
+            await self.postgres.upsert_cascade_ack(cascade_id, node_id, status, now)
 
     async def consistency_slo(self, cascade_id: str) -> dict[str, Any]:
         """I02 — time until fleet consistent after correction."""

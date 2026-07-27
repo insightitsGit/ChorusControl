@@ -299,6 +299,7 @@ html, body {
   color: var(--bad);
   border-bottom: 1px solid var(--line);
 }
+.rail-foot {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -306,7 +307,39 @@ html, body {
   border-top: 1px solid var(--line);
 }
 
-/* Theme toggle */
+/* Theme segmented control */
+.theme-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+}
+.theme-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  padding: 0.4rem 0.35rem;
+  border-radius: calc(var(--radius) - 1px);
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+.theme-switch button.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-soft);
+}
+.theme-switch button:hover:not(.is-active) {
+  color: var(--ink-soft);
+}
+
+/* Legacy single toggle (kept for compatibility) */
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -621,6 +654,25 @@ html, body {
   font-size: 0.82rem;
   color: var(--muted);
 }
+.wire-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+.wire-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.4rem;
+  border-radius: 0.25rem;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
 .score-chart-wrap { position: relative; margin-top: 1rem; max-width: 280px; }
 
 .health-ribbon {
@@ -872,6 +924,96 @@ table.data code {
   color: var(--code-ink);
   border-radius: var(--radius);
   font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.tax-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+}
+.tax-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.tax-toolbar select,
+.tax-toolbar input[type="search"] {
+  min-width: 10rem;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.tax-toolbar .tax-search {
+  flex: 1 1 12rem;
+}
+.tax-toolbar .tax-search input {
+  width: 100%;
+}
+.rel-wrap { margin-top: 0.75rem; }
+.rel-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+.rel-chip {
+  border: 1px solid var(--line);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 0.28rem 0.55rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 160ms var(--ease-out);
+}
+.rel-chip:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.tax-ow-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.tax-ow-label input,
+.tax-ow-label textarea {
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  width: 100%;
+}
+.tax-ow-label textarea {
+  resize: vertical;
+  min-height: 6rem;
   line-height: 1.45;
 }
 

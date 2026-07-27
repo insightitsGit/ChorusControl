@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
             "/healthz",
             "/readyz",
             "/api/v1/admin/license",
+            "/api/v1/admin/license/online-check",
             "/api/v1/admin/auth",
             "/api/v1/fleet/join",
             "/api/v1/fleet/heartbeat",
@@ -108,7 +109,7 @@ def create_app() -> FastAPI:
             status_code=200 if ready else 503,
         )
 
-    tabs = ["overview", "trace", "taxonomy", "memory", "guard", "admin"]
+    tabs = ["overview", "trace", "taxonomy", "cortex", "guard", "admin"]
 
     def _page(request: Request, tab_name: str):
         cc = request.app.state.cc
@@ -145,6 +146,12 @@ def create_app() -> FastAPI:
             methods=["GET"],
             name=f"tab_{_tab}",
         )
+
+    @app.get("/memory", response_class=HTMLResponse)
+    async def memory_alias(request: Request):
+        from starlette.responses import RedirectResponse
+
+        return RedirectResponse(url="/cortex", status_code=307)
 
     return app
 

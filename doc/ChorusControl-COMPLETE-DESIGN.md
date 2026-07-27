@@ -451,6 +451,7 @@ Honesty banners required in UI:
 | Trace | `/trace` | live wire WS, ledger, **Guard→Ledger→Shine** stitch, zero-token replay |
 | Taxonomy | `/taxonomy` | 64-d search, category tree, chunk health, reindex, **partition/warm ops** |
 | Memory | `/memory` | bitemporal facts, sleep, conflicts, **cascade on resolve**, explain/recall_at proxy |
+| Cortex | `/cortex` | PrismCortex activity, chunks, digest/recall/sleep; R04 `memory_endpoint` |
 | Guard | `/guard` | logs, shadow compare, lexicon, **Policy Studio** |
 | Admin | `/admin` | ChorusControl license, **stack license status**, tenants, audit/export, RBAC, support link, doctor snapshot |
 
@@ -532,7 +533,7 @@ Trace event schema (v1):
 
 ---
 
-##### 3.7.4 Cortex Memory `/memory` (ties to §3.11)
+##### 3.7.4 Cortex Memory `/memory` + `/cortex` (ties to §3.11, R04)
 
 | API | Behavior |
 |-----|----------|
@@ -543,6 +544,11 @@ Trace event schema (v1):
 | `POST /memory/explain` | Proxy Cortex `/explain` |
 | `POST /memory/recall_at` | Proxy time-travel recall |
 | `GET /memory/cascade/{id}` | Cascade status (acks, evictions) |
+| `GET /cortex/snapshot` | Activity + chunks + facts + serving `memory_endpoint` |
+| `POST /cortex/digest\|recall\|explain\|sleep` | Ops console against tenant memory |
+| `POST /cortex/conflicts/resolve` | Resolve + cascade |
+
+Tenant → memory addressing: fleet registry `memory_endpoint` (agent advertises via join/heartbeat). HTTP endpoints are proxied; `local://` / unset use mother-local PrismCortex.
 
 Prefer Cortex HTTP enterprise surfaces (`/conflicts`, `/explain`, `/recall_at`, replay certificate) via adapter — ChorusControl adds RBAC, audit, and cascade, **not** a second graph store.
 

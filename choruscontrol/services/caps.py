@@ -11,6 +11,30 @@ async def aggregate_caps(state) -> dict[str, Any]:
     peers = await state.fabric.peer_count()
     nodes = await state.fleet.list_nodes()
     dogfood = await state.graph.dogfood()
+
+    # Knowledge health from RAG partitions when available
+    knowledge_meta: dict[str, Any] = {"source": "unavailable"}
+    try:
+        parts = await state.rag.partitions("default")
+        if parts:
+            decays = []
+            for p in parts:
+                if isinstance(p, dict):
+                    for k in ("staleness", "decay", "health"):
+                        if k in p and p[k] is not None:
+                            try:
+                                decays.append(float(p[k]))
+                            except (TypeError, ValueError):
+                                pass
+            knowledge_meta = {
+                "source": "rag.partitions",
+                "partition_count": len(parts),
+                "mean_staleness": (sum(decays) / len(decays)) if decays else None,
+                "demo": state.adapter_sources.get("rag") == "null",
+            }
+    except Exception:  # noqa: BLE001
+        knowledge_meta = {"source": "error"}
+
     return {
         "guard": guard_caps,
         "shine": shine_caps,
@@ -30,6 +54,7 @@ async def aggregate_caps(state) -> dict[str, Any]:
             "metrics_available": True,
             "source": state.adapter_sources.get("cache"),
         },
+        "rag": knowledge_meta,
         "fabric": {
             "peers": peers,
             "connected": True,
@@ -52,19 +77,45 @@ async def aggregate_caps(state) -> dict[str, Any]:
     }
 
 
-def compute_ai_score(caps: dict[str, Any], metrics: dict[str, Any], incidents: int) -> dict[str, Any]:
-    """Transparent formula — no black box. Returns DEMO when inputs are synthetic."""
+def compute_ai_score(
+    caps: dict[str, Any],
+    metrics: dict[str, Any],
+    incidents: int,
+    *,
+    guard_block_rate: float | None = None,
+    mean_staleness: float | None = None,
+) -> dict[str, Any]:
+    """Transparent formula — no black box. DEMO when inputs are synthetic/Null."""
     security = 90.0 if caps.get("guard", {}).get("profile") else 50.0
     if caps.get("guard", {}).get("profile") == "web_chat":
         security = 75.0
+    if guard_block_rate is not None:
+        # Higher block rate on clearly bad traffic is not always bad; use mild penalty for noisy blocks
+        security = max(40.0, min(95.0, 90.0 - guard_block_rate * 40.0))
+
     governance = 85.0 if caps.get("license", {}).get("state") in ("valid", "grace") else 20.0
     reliability = max(0.0, 100.0 - incidents * 5)
     performance = min(100.0, float(metrics.get("hit_rate", 0) or 0) * 100)
     cost = min(100.0, float(metrics.get("cost_saved_usd", 0) or 0) * 2)
+
+    # Knowledge from real staleness when present (0=fresh → 100; 1=stale → 0)
     knowledge = 70.0
-    if caps.get("graph", {}).get("dogfood", {}).get("ok"):
+    rag = caps.get("rag") or {}
+    staleness = mean_staleness
+    if staleness is None and rag.get("mean_staleness") is not None:
+        staleness = float(rag["mean_staleness"])
+    if staleness is not None:
+        # Accept either 0-1 or 0-100 scales
+        s = float(staleness)
+        if s > 1.0:
+            s = s / 100.0
+        knowledge = max(0.0, min(100.0, (1.0 - s) * 100.0))
+    elif caps.get("graph", {}).get("dogfood", {}).get("ok"):
         knowledge = 78.0
+
     compliance = 80.0 if caps.get("license", {}).get("state") == "valid" else 40.0
+    if caps.get("license", {}).get("state") == "grace":
+        compliance = 55.0
     ops = min(100.0, 60.0 + float(caps.get("fleet_nodes", 0)) * 5)
     dims = {
         "security": security,
@@ -77,15 +128,25 @@ def compute_ai_score(caps: dict[str, Any], metrics: dict[str, Any], incidents: i
         "operational_health": ops,
     }
     overall = sum(dims.values()) / len(dims)
+    sources = caps.get("sources") or {}
     demo = bool(
         metrics.get("demo")
         or caps.get("guard", {}).get("demo")
-        or (caps.get("sources") or {}).get("cache") == "null"
+        or sources.get("cache") == "null"
+        or sources.get("rag") == "null"
+        or rag.get("demo")
     )
     return {
         "overall": round(overall, 1),
         "dimensions": {k: round(v, 1) for k, v in dims.items()},
         "formula": "equal_weight_mean(dimensions)",
+        "inputs": {
+            "incidents": incidents,
+            "guard_block_rate": guard_block_rate,
+            "mean_staleness": staleness,
+            "hit_rate": metrics.get("hit_rate"),
+            "rag_source": rag.get("source"),
+        },
         "demo": demo,
     }
 

@@ -158,30 +158,196 @@ class NullGraph:
 
 
 class NullRag:
-    async def tree(self, tenant_id: str) -> dict[str, Any]:
-        return {
-            "tenant_id": tenant_id,
-            "categories": [
+    """Stateful DEMO RAG so Taxonomy warm/reindex show visible version + health changes."""
+
+    def __init__(self) -> None:
+        # tenant_id -> mutable taxonomy state
+        self._state: dict[str, dict[str, Any]] = {}
+
+    def _ensure(self, tenant_id: str) -> dict[str, Any]:
+        tid = tenant_id or "default"
+        if tid in self._state:
+            return self._state[tid]
+        clinical = tid.startswith("aurora") or tid in ("aurora-health", "aurora-pharmacy")
+        if clinical:
+            categories = [
+                {"slug": "clinical_guidelines", "label": "Clinical guidelines"},
+                {"slug": "med_recon", "label": "Medication reconciliation"},
+                {"slug": "discharge", "label": "Discharge"},
+                {"slug": "allergy", "label": "Allergy"},
+            ]
+            partitions = [
+                {"partition": "kb_clinical_guidelines", "version": 1, "tenant_id": tid, "status": "ready"},
+                {"partition": "kb_med_recon", "version": 1, "tenant_id": tid, "status": "ready"},
+                {"partition": "kb_discharge", "version": 1, "tenant_id": tid, "status": "ready"},
+            ]
+            decay = [
+                {"slug": "clinical_guidelines", "staleness": 0.35},
+                {"slug": "med_recon", "staleness": 0.55},
+                {"slug": "discharge", "staleness": 0.22},
+                {"slug": "allergy", "staleness": 0.1},
+            ]
+            docs = [
+                {
+                    "category_slug": "clinical_guidelines",
+                    "chunk_ref": "guideline",
+                    "text": "DEMO clinical guideline: med-recon before discharge (illustrative, no PHI).",
+                },
+                {
+                    "category_slug": "med_recon",
+                    "chunk_ref": "med_recon",
+                    "text": "DEMO med-recon checklist: allergy cross-check, prior_auth flags.",
+                },
+                {
+                    "category_slug": "discharge",
+                    "chunk_ref": "discharge",
+                    "text": "DEMO discharge partition: summary + follow-up tags.",
+                },
+            ]
+        else:
+            categories = [
                 {"slug": "risk", "label": "Risk"},
                 {"slug": "growth", "label": "Growth"},
-            ],
+            ]
+            partitions = [
+                {"partition": "kb_markdown", "version": 3, "tenant_id": tid, "status": "ready"},
+            ]
+            decay = [
+                {"slug": "risk", "staleness": 0.12},
+                {"slug": "growth", "staleness": 0.4},
+            ]
+            docs = [
+                {
+                    "category_slug": "risk",
+                    "chunk_ref": "risk",
+                    "text": "DEMO risk note for taxonomy search.",
+                },
+                {
+                    "category_slug": "growth",
+                    "chunk_ref": "growth",
+                    "text": "DEMO growth note for taxonomy search.",
+                },
+            ]
+        self._state[tid] = {
+            "categories": categories,
+            "partitions": partitions,
+            "decay": decay,
+            "docs": docs,
+            "bleed_risk": 0.08 if not clinical else 0.18,
+            "last_job": None,
+        }
+        return self._state[tid]
+
+    async def tree(self, tenant_id: str) -> dict[str, Any]:
+        st = self._ensure(tenant_id)
+        return {
+            "tenant_id": tenant_id,
+            "categories": list(st["categories"]),
+            "demo": True,
+            "last_job": st.get("last_job"),
         }
 
     async def search(self, tenant_id: str, query: str) -> list[dict[str, Any]]:
-        return [{"category_slug": "risk", "text": f"Hit for {query}", "tenant_id": tenant_id}]
+        st = self._ensure(tenant_id)
+        q = (query or "").lower().strip()
+        hits = []
+        for d in st["docs"]:
+            if not q or q in d["text"].lower() or q in d["category_slug"].lower():
+                hits.append(
+                    {
+                        **d,
+                        "chunk_ref": d.get("chunk_ref") or d["category_slug"],
+                        "chunk_text": d["text"],
+                        "tenant_id": tenant_id,
+                        "score": 0.9 if q else 0.5,
+                    }
+                )
+        if not hits and q:
+            hits.append(
+                {
+                    "category_slug": st["categories"][0]["slug"],
+                    "chunk_ref": st["categories"][0]["slug"],
+                    "chunk_text": f"DEMO no exact hit for '{query}' — closest category shown.",
+                    "text": f"DEMO no exact hit for '{query}' — closest category shown.",
+                    "tenant_id": tenant_id,
+                    "score": 0.2,
+                }
+            )
+        return hits
 
     async def partitions(self, tenant_id: str) -> list[dict[str, Any]]:
-        return [{"partition": "kb_markdown", "version": 3, "tenant_id": tenant_id}]
+        st = self._ensure(tenant_id)
+        return [dict(p) for p in st["partitions"]]
 
     async def chunks_health(self, tenant_id: str) -> dict[str, Any]:
+        st = self._ensure(tenant_id)
         return {
             "tenant_id": tenant_id,
-            "decay": [{"slug": "risk", "staleness": 0.12}, {"slug": "growth", "staleness": 0.4}],
-            "bleed_risk": 0.08,
+            "decay": [dict(d) for d in st["decay"]],
+            "bleed_risk": st["bleed_risk"],
             "demo": True,
+            "last_job": st.get("last_job"),
         }
 
     def warm_partition(self, tenant_id: str, partition: str) -> None:
         import time
 
         time.sleep(0.05)
+        st = self._ensure(tenant_id)
+        part = partition or (st["partitions"][0]["partition"] if st["partitions"] else "kb_markdown")
+        found = False
+        for p in st["partitions"]:
+            if p["partition"] == part:
+                p["version"] = int(p.get("version") or 0) + 1
+                p["status"] = "warm"
+                p["warmed_at"] = time.time()
+                found = True
+                break
+        if not found:
+            st["partitions"].append(
+                {
+                    "partition": part,
+                    "version": 1,
+                    "tenant_id": tenant_id,
+                    "status": "warm",
+                    "warmed_at": time.time(),
+                }
+            )
+        # Warming reduces staleness across related categories
+        for d in st["decay"]:
+            d["staleness"] = round(max(0.0, float(d.get("staleness") or 0) * 0.45), 3)
+        st["bleed_risk"] = round(max(0.01, float(st.get("bleed_risk") or 0.1) * 0.7), 3)
+        st["last_job"] = {
+            "type": "warm_partition",
+            "partition": part,
+            "tenant_id": tenant_id,
+            "at": time.time(),
+        }
+
+    def reindex(self, tenant_id: str, category_id: str | None = None) -> None:
+        import time
+
+        time.sleep(0.05)
+        st = self._ensure(tenant_id)
+        for p in st["partitions"]:
+            if category_id and category_id not in p["partition"] and category_id not in (
+                c["slug"] for c in st["categories"]
+            ):
+                continue
+            p["version"] = int(p.get("version") or 0) + 1
+            p["status"] = "reindexed"
+            p["reindexed_at"] = time.time()
+        for d in st["decay"]:
+            if category_id and d["slug"] != category_id and category_id not in d["slug"]:
+                continue
+            d["staleness"] = 0.05
+        st["bleed_risk"] = 0.04
+        st["last_job"] = {
+            "type": "reindex",
+            "category_id": category_id,
+            "tenant_id": tenant_id,
+            "at": time.time(),
+        }
+
+    def reindex_category(self, tenant_id: str, category_id: str | None = None) -> None:
+        self.reindex(tenant_id, category_id)

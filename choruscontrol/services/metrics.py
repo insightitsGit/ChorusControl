@@ -90,27 +90,53 @@ async def predictive_recommendations(state) -> dict[str, Any]:
             }
         )
 
-    # RCA: correlate recent incidents with version snapshot churn
+    # RCA: correlate recent incidents with concrete product diffs when 2+ days exist
     incidents = await state.store.fetchall(
         "SELECT * FROM incidents ORDER BY created_at DESC LIMIT 5"
     )
-    snaps = await state.store.fetchall(
-        "SELECT * FROM version_snapshots ORDER BY id DESC LIMIT 10"
-    )
-    if incidents and snaps:
-        recs.append(
-            {
-                "id": "rca-version-correlate",
-                "severity": "info",
-                "title": "RCA hint: version churn near incidents",
-                "detail": (
-                    f"{len(incidents)} recent incidents; {len(snaps)} recent version snapshots. "
-                    "Compare node products day-over-day before cascade."
-                ),
-                "predictive": False,
-                "rca": True,
-            }
+    for inc in incidents:
+        snaps = await state.store.fetchall(
+            "SELECT * FROM version_snapshots ORDER BY id DESC LIMIT 4"
         )
+        if len(snaps) >= 2:
+            before = json.loads(snaps[1]["products_json"])
+            after = json.loads(snaps[0]["products_json"])
+            changed = {
+                k: {"before": before.get(k), "after": after.get(k)}
+                for k in sorted(set(before) | set(after))
+                if before.get(k) != after.get(k)
+            }
+            if changed:
+                recs.append(
+                    {
+                        "id": f"rca-{inc['incident_id']}",
+                        "severity": "info",
+                        "title": f"RCA: product churn near {inc['title'][:48]}",
+                        "detail": f"Changed packages: {', '.join(list(changed)[:6])}",
+                        "predictive": False,
+                        "rca": True,
+                        "products_before": before,
+                        "products_after": after,
+                        "incident_id": inc["incident_id"],
+                    }
+                )
+                break
+
+    # Knowledge staleness trend
+    stale = await series(state.store, "rag.staleness", 40)
+    if stale:
+        slope = _slope([p["value"] for p in stale])
+        last = stale[-1]["value"]
+        if last > 0.55 or (slope is not None and slope > 0.01):
+            recs.append(
+                {
+                    "id": "rag-staleness",
+                    "severity": "high" if last > 0.7 else "medium",
+                    "title": "Knowledge staleness rising",
+                    "detail": f"mean_staleness={last:.3f} slope={slope}",
+                    "predictive": True,
+                }
+            )
 
     metrics = await state.cache.get_metrics()
     if not recs:
@@ -162,6 +188,35 @@ class MetricsSampler:
                 await record_sample(
                     self.state.store, "cache.tokens_saved", float(m.get("tokens_saved") or 0)
                 )
+                # RAG staleness sample for Score + predictive
+                try:
+                    parts = await self.state.rag.partitions("default")
+                    decays = []
+                    for p in parts or []:
+                        if isinstance(p, dict):
+                            for k in ("staleness", "decay", "health"):
+                                if p.get(k) is not None:
+                                    try:
+                                        decays.append(float(p[k]))
+                                    except (TypeError, ValueError):
+                                        pass
+                    if decays:
+                        await record_sample(
+                            self.state.store, "rag.staleness", sum(decays) / len(decays)
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from choruscontrol.services.version_intel import record_deployment_snapshot
+
+                    await record_deployment_snapshot(self.state, "default")
+                except Exception:  # noqa: BLE001
+                    pass
+                # Optional Side 1 license online check (~14 days)
+                try:
+                    await self.state.run_license_online_check(force=False)
+                except Exception:  # noqa: BLE001
+                    pass
                 await prune_samples(self.state.store, self.state.settings.metrics_retention_hours)
                 from choruscontrol.services.trace_retention import purge_traces
 

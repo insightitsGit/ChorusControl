@@ -52,6 +52,20 @@ class AgentRuntime:
         self._started_at = time.time()
         self._stop = asyncio.Event()
 
+    def _resolve_memory_endpoint(self) -> str | None:
+        """R04 — advertise Cortex address for this node."""
+        if self.settings.memory_endpoint:
+            return self.settings.memory_endpoint
+        role = (self.settings.node_role or "").lower()
+        if role not in ("memory", "cortex"):
+            return None
+        try:
+            import prismcortex  # noqa: F401
+        except Exception:  # noqa: BLE001
+            return None
+        nid = self.node_id or self.settings.node_id or "pending"
+        return f"local://{nid}"
+
     async def start(self) -> None:
         if (
             self.settings.network_zone == "external"
@@ -73,7 +87,7 @@ class AgentRuntime:
                 "network_zone": self.settings.network_zone,
                 "products": products,
                 "caps_digest": caps_digest(products),
-                "memory_endpoint": None,
+                "memory_endpoint": self._resolve_memory_endpoint(),
             }
         )
         self.node_id = result["node_id"]
@@ -98,6 +112,7 @@ class AgentRuntime:
                         "products": products,
                         "caps_digest": caps_digest(products),
                         "role": self.settings.node_role,
+                        "memory_endpoint": self._resolve_memory_endpoint(),
                         "ledger_dropped_total": self.ledger.dropped if self.ledger else 0,
                         "agent_ledger_dropped_total": self.ledger.dropped if self.ledger else 0,
                     }

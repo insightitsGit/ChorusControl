@@ -126,6 +126,54 @@ CREATE TABLE IF NOT EXISTS metric_samples (
   labels_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS metric_samples_name_ts ON metric_samples(name, ts DESC);
+
+CREATE TABLE IF NOT EXISTS asset_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  meta_json TEXT NOT NULL,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS asset_versions_asset ON asset_versions(asset_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS incident_assets (
+  incident_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  rel TEXT NOT NULL DEFAULT 'impacted_by',
+  PRIMARY KEY (incident_id, asset_id, rel)
+);
+
+CREATE TABLE IF NOT EXISTS enterprise_policies (
+  policy_id TEXT PRIMARY KEY,
+  domain TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  body_json TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_at REAL NOT NULL,
+  UNIQUE(domain, tenant_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS compliance_findings (
+  finding_id TEXT PRIMARY KEY,
+  severity TEXT NOT NULL,
+  code TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail_json TEXT NOT NULL,
+  created_at REAL NOT NULL,
+  resolved INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS deployment_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  policy_hash TEXT,
+  policy_json TEXT,
+  partitions_json TEXT,
+  products_json TEXT,
+  UNIQUE(tenant_id, day)
+);
 """
 
 

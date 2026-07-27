@@ -48,10 +48,10 @@
           <button type="button" class="btn secondary" id="applyToken">Apply</button>
         </div>
         <button type="button" class="rail-chat-btn" id="openChat">Ops Assistant</button>
-        <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle color theme">
-          <span class="tt-orb" aria-hidden="true"></span>
-          <span id="themeLabel">Theme</span>
-        </button>
+        <div class="theme-switch" role="group" aria-label="Color theme">
+          <button type="button" data-theme-set="light" id="themeLight">Light</button>
+          <button type="button" data-theme-set="dark" id="themeDark">Dark</button>
+        </div>
         <div class="lic-chip" id="licChip" data-state="{{ license_state }}">
           <span class="lic-dot"></span>
           <span id="lic">{{ license_state }}</span>
@@ -89,19 +89,22 @@
       <div class="chat-head">
         <div>
           <strong>Ops Assistant</strong>
-          <p>Grounded in fleet, caps, graph &amp; pipelines — not world-truth.</p>
+          <p>Guard → ChorusGraph → Shine · live Overview grounding</p>
         </div>
         <button type="button" class="chat-close" id="closeChat" aria-label="Close assistant">×</button>
       </div>
       <div class="chat-suggest" id="chatSuggest">
-        <button type="button" data-q="Show me the live pipeline">Pipeline</button>
-        <button type="button" data-q="How is fleet health?">Fleet</button>
+        <button type="button" data-q="Explain the dashboard numbers in plain English">Explain scores</button>
+        <button type="button" data-q="Why is reliability low?">Reliability</button>
         <button type="button" data-q="What is the AI Score?">AI Score</button>
-        <button type="button" data-q="Any policy drift?">Policy</button>
+        <button type="button" data-q="Explain L0 through L5 health">Layers</button>
+        <button type="button" data-q="Who are the agents and what do they do?">Agents</button>
+        <button type="button" data-q="What does the clinical agent do?">Clinical</button>
+        <button type="button" data-q="Explain GREEN vs ORANGE">Roles</button>
       </div>
       <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
       <form class="chat-form" id="chatForm">
-        <input id="chatInput" type="text" placeholder="Ask about pipelines, fleet, cost, incidents…" autocomplete="off" />
+        <input id="chatInput" type="text" placeholder="Ask about scores, agents, pipelines, incidents…" autocomplete="off" />
         <button type="submit" class="btn">Send</button>
       </form>
       <div class="chat-confirm" id="chatConfirm" hidden>
@@ -117,6 +120,6 @@
   <button type="button" class="fab-chat" id="fabChat" aria-label="Open Ops Assistant">Chat</button>
   <button type="button" class="nav-toggle" id="navToggle" aria-label="Open navigation">Menu</button>
   <script src="/static/viz.js"></script>
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

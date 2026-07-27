@@ -43,11 +43,13 @@ curl -H "Authorization: Bearer healthcare-demo-token" http://127.0.0.1:8443/api/
 1. **Overview** — AI Score, fleet topology (3 nodes), live pipeline viz, WS fleet updates  
 2. **Trace** — open a clinical run; Replay (zero-token)  
 3. **Taxonomy** — warm / reindex jobs for clinical partitions  
-4. **Memory** — Cortex conflicts / facts (NullAdapters in demo)  
+4. **Cortex** (`/cortex`) — PrismCortex activity log, memory-graph chunks, facts/edges, digest / recall / sleep (seeded for `aurora-health`)  
 5. **Guard** — clinical policy + shadow compare  
 6. **Admin** — license, doctor, stack licenses, tenants, SOC2 export, recommendations  
 
-Ops Assistant (FAB): ask about fleet, AI Score, policy drift, cascades.
+Ops Assistant (FAB): **Guard → ChorusGraph → Shine** wire on every ask, then plain-English
+answers from live Overview / agent catalog. Rail **Light / Dark** theme switch. Ask about
+fleet, AI Score, policy drift, cascades, or **what each agent does**.
 
 ## Re-seed against a running mother
 

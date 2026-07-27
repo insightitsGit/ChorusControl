@@ -47,11 +47,24 @@ class AppState:
     node_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     postgres: Any | None = None
     metrics_sampler: MetricsSampler | None = None
+    online_license: dict[str, Any] | None = None
 
     async def refresh_license(self) -> LicenseStatus:
+        from choruscontrol.license.online import apply_online_to_status, load_cached_check
+
         key = resolve_license_key(self.settings)
-        self.license_status = self.license_verifier.verify(key)
+        offline = self.license_verifier.verify(key)
+        cached = self.online_license or load_cached_check(self.settings)
+        self.online_license = cached
+        self.license_status = apply_online_to_status(offline, cached)
         return self.license_status
+
+    async def run_license_online_check(self, *, force: bool = False) -> dict[str, Any]:
+        from choruscontrol.license.online import run_online_check
+
+        out = await run_online_check(self, force=force)
+        await self.refresh_license()
+        return out
 
     async def broadcast_fleet(self, event: dict[str, Any]) -> None:
         dead = []
@@ -111,9 +124,13 @@ async def build_state(settings: Settings) -> AppState:
         postgres = PostgresSink(settings.database_url)
         try:
             await postgres.connect()
+            restored = await postgres.restore_control_plane_into_sqlite(store)
+            if restored.get("restored"):
+                log.info("control plane hydrated from postgres: %s", restored)
         except Exception as exc:  # noqa: BLE001
             postgres.ok = False
             postgres.last_error = str(exc)
+            log.warning("postgres connect/restore failed: %s", exc)
 
     audit = AuditLogger(audit_key, settings.audit_log_path, postgres=postgres)
     audit.start()
@@ -123,7 +140,7 @@ async def build_state(settings: Settings) -> AppState:
     guard, shine = bundle.guard, bundle.shine
     cortex, graph, rag = bundle.cortex, bundle.graph, bundle.rag
 
-    fleet = FleetRegistry(store)
+    fleet = FleetRegistry(store, postgres=postgres)
     jobs = MaintenanceJobQueue(settings.jobs_max_concurrent)
     jobs.register("cortex.sleep", lambda tenant_id, params: cortex.sleep(tenant_id))
 
@@ -151,7 +168,7 @@ async def build_state(settings: Settings) -> AppState:
     async def _mark(tenant_id: str, tags: list[str]) -> None:
         await graph.mark_revalidate(tenant_id, tags)
 
-    cascade = CascadeService(store, broadcaster, cache, _mark)
+    cascade = CascadeService(store, broadcaster, cache, _mark, postgres=postgres)
 
     async def _cascade_job(tenant_id: str, params: dict[str, Any]) -> None:
         await cascade.run(
@@ -202,6 +219,26 @@ async def build_state(settings: Settings) -> AppState:
         intended_policies={"default": default_policy},
         postgres=postgres,
     )
+    if postgres is not None:
+        store.postgres = postgres  # type: ignore[attr-defined]
+
+    def _compliance_sync(tenant_id: str, params: dict[str, Any]) -> None:
+        import asyncio
+
+        from choruscontrol.services.compliance import run_compliance_scan
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                fut = asyncio.run_coroutine_threadsafe(run_compliance_scan(state), loop)
+                fut.result(timeout=60)
+            else:
+                loop.run_until_complete(run_compliance_scan(state))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("compliance.scan failed: %s", exc)
+
+    jobs.register("compliance.scan", _compliance_sync)
+
     sampler = MetricsSampler(state)
     if settings.demo_mode and settings.metrics_sample_interval_seconds > 5:
         settings.metrics_sample_interval_seconds = 5.0
