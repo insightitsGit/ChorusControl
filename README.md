@@ -74,8 +74,10 @@ ChorusControl is **self-hosted software**. Insight IT Solutions sells the **comm
 
 ### What you buy from us
 
-1. Create / sign in at **[www.insightits.com](https://www.insightits.com)** (customer portal).  
-2. Choose a **ChorusControl** plan (Stripe checkout for Starter / Enterprise; Sovereign via sales).  
+The commercial product is **ChorusControl Enterprise** only (soft CTA **CONTROL** on [insightits.com](https://www.insightits.com/products/choruscontrol.html)). There is **no Starter SKU** on the public catalog today.
+
+1. Request access via **CONTROL** / sign in at **[www.insightits.com](https://www.insightits.com)**.  
+2. Complete Enterprise purchase / access (portal when Stripe checkout is live; sales / admin issue until then).  
 3. Copy or download the **license JWT** from the portal (or email delivery).  
 4. Install ChorusControl in your environment (`DEMO_MODE=0`).  
 5. Paste the key into **Admin → License** or set `CHORUSCONTROL_LICENSE_KEY`.  
@@ -83,20 +85,18 @@ ChorusControl is **self-hosted software**. Insight IT Solutions sells the **comm
 
 **You do not** put Stripe keys, private signing keys, or the company website inside your ChorusControl image.
 
-### Plans & list pricing
+### Pricing (commercial)
 
-Commercial tiers are defined on Side 1 (keep in sync with portal checkout). List prices:
+| Product | List price | How to buy |
+|---------|------------|------------|
+| **ChorusControl Enterprise** | **$24,000 / year** | Soft CTA **CONTROL** · [pricing](https://www.insightits.com/pricing.html) · portal `/dashboard.html#choruscontrol` |
 
-| Tier | List price | Max nodes | Max tenants | Included product features (Side 2 flags) |
-|------|------------|-----------|-------------|------------------------------------------|
-| **Starter** | **$499/mo** | 4 | 5 | Core UI, sleep, basic taxonomy |
-| **Enterprise** | **$2,499/mo** | 16 | 50 | + `trace.replay`, `guard.shadow`, `audit.export` |
-| **Sovereign** | **Custom** | 64 | 200 | Enterprise features + air-gap / commercial SLA (sales-issued) |
+Issued Enterprise JWTs typically carry entitlements such as `max_nodes` / `max_tenants` and features `trace.replay`, `guard.shadow`, `audit.export` (exact claims come from Side 1 at issue time).
 
-- License JWT `exp` is typically **~90 days** (or through the Stripe period); renewals re-issue a new key.  
+- License JWT `exp` is typically **~90 days** (or through the Stripe / contract period); renewals re-issue a new key.  
 - After `exp`, Side 2 enters **14-day read-only grace** (observe OK; mutations blocked), then fail-closed.  
-- **Sovereign** is not self-serve checkout — contact sales / Agile Super Admin issuance.  
-- Prices above are **list labels** from the Side 1 catalog; quotes, discounts, and multi-year deals are commercial — see the portal or sales.
+- Air-gap / custom SLA deals are still **Enterprise** commercially — issued by sales / Agile Super Admin as needed (JWT may use a higher entitlement profile; not a separate public “Starter” plan).  
+- Quotes and discounts are commercial — portal or sales.
 
 Portal / support: [www.insightits.com](https://www.insightits.com) · support deep-link configurable via `INSIGHTITS_SUPPORT_URL`.  
 Contract detail: [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com-Handoff.md).

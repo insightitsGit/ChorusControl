@@ -103,13 +103,19 @@ Side 2 guidance:
 - Disable: `CHORUSCONTROL_LICENSE_ONLINE_CHECK=0`
 - Force from UI/API: `POST /api/v1/admin/license/online-check`
 
-### 3.4 Tier → features
+### 3.4 Commercial SKU vs JWT `tier` claim
 
-| Tier | Features |
-|------|----------|
-| `starter` | Core UI, sleep, basic taxonomy |
-| `enterprise` | + `trace.replay`, `guard.shadow`, `audit.export` |
-| `sovereign` | Enterprise + air-gap SLA (commercial) |
+**Commercial (website canon):** only **ChorusControl Enterprise** — **$24,000 / year**, soft CTA **CONTROL**. No public Starter plan. Stripe price map may still be empty until checkout is live; sales / admin issue until then.
+
+**JWT `tier` claim** (technical entitlements Side 2 understands — do not market as separate storefront SKUs unless product decides otherwise):
+
+| Claim `tier` | Features | Typical use |
+|--------------|----------|-------------|
+| `enterprise` | + `trace.replay`, `guard.shadow`, `audit.export` | **Issued product today** |
+| `starter` | Core UI, sleep, basic taxonomy | Reserved / not sold — verifier accepts if ever issued |
+| `sovereign` | Same feature flags as enterprise (+ commercial air-gap SLA) | Sales / admin higher entitlement profile, not a second public SKU |
+
+Default issued claim for paid customers: **`tier: "enterprise"`**.
 
 ---
 
