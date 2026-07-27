@@ -41,52 +41,36 @@ PowerShell: `pwsh scripts/build_release.ps1`
 - [x] `twine check` passes
 - [x] CI on `main` (`.github/workflows/ci.yml`) + tag publish (`.github/workflows/publish.yml`)
 
-### One-time: Trusted Publisher on PyPI
+### One-time: Trusted Publisher on PyPI (optional)
 
-1. Sign in at [pypi.org](https://pypi.org) as the Insight ITS publisher account.
-2. **Publishing → Add a new pending publisher** (or create project `choruscontrol` first).
-3. Set:
-   - **PyPI project name:** `choruscontrol`
+Local **twine upload** is the primary release path today. GitHub **Publish** on tags always runs tests + build; PyPI upload via Actions only succeeds when one of these is configured:
+
+1. Sign in at [pypi.org](https://pypi.org) → project `choruscontrol` → **Publishing** → Trusted Publisher:
    - **Owner:** `insightitsGit`
    - **Repository:** `ChorusControl`
    - **Workflow name:** `publish.yml`
-   - **Environment name:** leave empty (unless you add a matching GitHub Environment)
-4. Save. First tag upload creates the project via OIDC — no long-lived API token required.
+   - **Environment name:** leave empty
+2. **Or** add repo secret `PYPI_API_TOKEN` (`pypi-…`) for token upload from Actions.
 
-Optional TestPyPI: same form on [test.pypi.org](https://test.pypi.org), then tag a dry-run or use manual `twine upload --repository testpypi dist/*`.
+Without either, the OIDC publish step is **non-blocking** (`continue-on-error`) so tag CI stays green after you already uploaded with twine.
 
-### Release command (after Trusted Publisher is saved)
-
-```bash
-# on main, clean tree
-git pull
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-GitHub Actions: **Publish** workflow → test → build → `pypa/gh-action-pypi-publish`.
-
-Or local:
+### Release command
 
 ```bash
-python -m build && twine check dist/* && twine upload dist/*
+# on main, clean tree — build + upload locally (primary)
+python -m build && twine upload dist/*
+
+# optional: tag for GitHub verify workflow
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 Verify:
 
 ```bash
-pip install "choruscontrol[server,agent]==0.1.1"
+pip install "choruscontrol[server,postgres,prism]==0.1.2"
 choruscontrol doctor --mode mother
-# Ceremony JWT verifies without CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX
 ```
-
-### Manual fallback (API token)
-
-```bash
-twine upload dist/*          # or --repository testpypi
-```
-
-Prefer Trusted Publisher over long-lived tokens.
 
 ## Container worker (lightweight)
 
