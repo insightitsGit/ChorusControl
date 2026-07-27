@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }}</title>
+  <script>
+    // Theme bootstrap before first paint — dark-first mission control, light optional.
+    (function () {
+      var t = localStorage.getItem("cc_theme");
+      if (t !== "light" && t !== "dark") {
+        t = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <aside class="rail" aria-label="Primary">
+      <a class="mark" href="/overview">
+        <span class="mark-glyph" aria-hidden="true"></span>
+        <span class="mark-text">
+          <strong>ChorusControl</strong>
+          <em>AI Operations</em>
+        </span>
+      </a>
+      <nav class="rail-nav">
+        {% for t in tabs %}
+        <a href="/{{ t }}" class="rail-link {% if t == tab %}is-active{% endif %}" data-tab="{{ t }}">
+          <span class="rail-index">{{ loop.index }}</span>
+          <span class="rail-label">{{ t }}</span>
+        </a>
+        {% endfor %}
+      </nav>
+      <div class="rail-foot">
+        <button type="button" class="rail-chat-btn" id="openChat">Ops Assistant</button>
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle color theme">
+          <span class="tt-orb" aria-hidden="true"></span>
+          <span id="themeLabel">Theme</span>
+        </button>
+        <div class="lic-chip" id="licChip" data-state="{{ license_state }}">
+          <span class="lic-dot"></span>
+          <span id="lic">{{ license_state }}</span>
+        </div>
+        <a class="rail-support" id="renewLink" href="{{ support_url }}" target="_blank" rel="noreferrer">Support</a>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      {% if license_state == 'grace' %}
+      <div class="banner banner-grace" role="status">License in grace — platform is read-only. Renew via the Insight ITS portal.</div>
+      {% endif %}
+      <div class="banner banner-demo" id="demoBanner" hidden role="status">Demo mode — NullAdapters active; metrics labeled honestly.</div>
+
+      <header class="page-head">
+        <div class="page-head-copy reveal">
+          <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span id="eyebrow">Operations platform</span></p>
+          <h1 id="heading">{{ tab|capitalize }}</h1>
+          <p class="lede" id="blurb"></p>
+        </div>
+        <div class="page-actions reveal" id="actions" style="animation-delay:80ms"></div>
+      </header>
+
+      <main id="main" data-tab="{{ tab }}">
+        <div id="view" class="view"></div>
+        <details class="devtools">
+          <summary>Diagnostics payload</summary>
+          <pre id="out"></pre>
+        </details>
+      </main>
+    </div>
+
+    <aside class="chat-drawer" id="chatDrawer" aria-label="Ops Assistant">
+      <div class="chat-head">
+        <div>
+          <strong>Ops Assistant</strong>
+          <p>Grounded in fleet, caps, graph &amp; pipelines — not world-truth.</p>
+        </div>
+        <button type="button" class="chat-close" id="closeChat" aria-label="Close assistant">×</button>
+      </div>
+      <div class="chat-suggest" id="chatSuggest">
+        <button type="button" data-q="Show me the live pipeline">Pipeline</button>
+        <button type="button" data-q="How is fleet health?">Fleet</button>
+        <button type="button" data-q="What is the AI Score?">AI Score</button>
+        <button type="button" data-q="Any policy drift?">Policy</button>
+      </div>
+      <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+      <form class="chat-form" id="chatForm">
+        <input id="chatInput" type="text" placeholder="Ask about pipelines, fleet, cost, incidents…" autocomplete="off" />
+        <button type="submit" class="btn">Send</button>
+      </form>
+      <div class="chat-confirm" id="chatConfirm" hidden>
+        <p id="chatConfirmMsg"></p>
+        <div class="chat-confirm-actions">
+          <button type="button" class="btn secondary" id="chatConfirmCancel">Cancel</button>
+          <button type="button" class="btn" id="chatConfirmOk">Confirm execute</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <button type="button" class="fab-chat" id="fabChat" aria-label="Open Ops Assistant">Chat</button>
+  <button type="button" class="nav-toggle" id="navToggle" aria-label="Open navigation">Menu</button>
+  <script src="/static/viz.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

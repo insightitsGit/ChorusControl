@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: cc
+      POSTGRES_PASSWORD: cc
+      POSTGRES_DB: choruscontrol
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cc -d choruscontrol"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mother:
+    build: .
+    ports:
+      - "8443:8443"
+    environment:
+      CHORUSCONTROL_DEMO_MODE: "1"
+      CHORUSCONTROL_ADMIN_TOKEN: "dev-admin-token"
+      CHORUSCONTROL_SQLITE_PATH: /data/mother.db
+      CHORUSCONTROL_AUDIT_LOG_PATH: /data/audit.jsonl
+      CHORUSCONTROL_TRANSPORT_PRIMARY: http
+      # With --profile postgres, uncomment:
+      # DATABASE_URL: postgresql://cc:cc@postgres:5432/choruscontrol
+    volumes:
+      - ccdata:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8443/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bootstrap:
+    build: .
+    depends_on:
+      mother:
+        condition: service_healthy
+    environment:
+      CHORUSCONTROL_MOTHER_URL: http://mother:8443
+      CHORUSCONTROL_ADMIN_TOKEN: "dev-admin-token"
+      JOIN_TOKEN_FILE: /shared/join_token
+    volumes:
+      - shared:/shared
+    entrypoint: ["python", "scripts/demo_compose_bootstrap.py"]
+    restart: "no"
+
+  agent-green:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CHORUSCONTROL_MOTHER_URL: http://mother:8443
+      CHORUSCONTROL_NODE_ID: demo-green
+      CHORUSCONTROL_NODE_ROLE: GREEN
+      CHORUSCONTROL_TENANT_ID: demo
+      CHORUSCONTROL_NETWORK_ZONE: in_vpc
+      JOIN_TOKEN_FILE: /shared/join_token
+    volumes:
+      - shared:/shared
+    entrypoint: ["/bin/sh", "-c", "export CHORUSCONTROL_JOIN_TOKEN=$$(cat /shared/join_token) && exec choruscontrol-agent"]
+
+  agent-blue:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CHORUSCONTROL_MOTHER_URL: http://mother:8443
+      CHORUSCONTROL_NODE_ID: demo-blue
+      CHORUSCONTROL_NODE_ROLE: BLUE
+      CHORUSCONTROL_TENANT_ID: demo
+      CHORUSCONTROL_NETWORK_ZONE: in_vpc
+      JOIN_TOKEN_FILE: /shared/join_token
+    volumes:
+      - shared:/shared
+    entrypoint: ["/bin/sh", "-c", "export CHORUSCONTROL_JOIN_TOKEN=$$(cat /shared/join_token) && exec choruscontrol-agent"]
+
+volumes:
+  ccdata:
+  shared:
+  pgdata:
