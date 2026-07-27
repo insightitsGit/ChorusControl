@@ -172,11 +172,31 @@ class LiveGraph:
         return out
 
     async def mark_revalidate(self, tenant_id: str, tags: list[str]) -> None:
+        """Call sibling mark_revalidate with signature tolerance (BUG-010).
+
+        NullGraph / adapter style: ``(tenant_id, tags)``.
+        chorusgraph public helper needs a SidecarStore — without one we no-op
+        so cascade still completes.
+        """
         fn = getattr(self._b, "mark_revalidate", None)
-        if fn:
-            r = fn(tenant_id, tags)
-            if hasattr(r, "__await__"):
-                await r
+        if not fn:
+            return
+        for kwargs_only in (False, True):
+            try:
+                r = (
+                    fn(tenant_id=tenant_id, tags=tags)
+                    if kwargs_only
+                    else fn(tenant_id, tags)
+                )
+                if hasattr(r, "__await__"):
+                    await r
+                return
+            except TypeError:
+                continue
+        log.debug(
+            "mark_revalidate skipped on %s (needs sidecar or different signature)",
+            type(self._b),
+        )
 
     async def driver_latency(self) -> dict[str, Any]:
         fn = getattr(self._b, "driver_latency", None) or getattr(self._b, "prismdriver_stats", None)
@@ -195,13 +215,22 @@ class LiveRag:
         self._b = backend
 
     async def tree(self, tenant_id: str) -> dict[str, Any]:
+        from choruscontrol.services.taxonomy_rag import taxonomy_tree
+
+        # Prefer shared PrismRAG mapping/community tree (live when package present)
+        packed = taxonomy_tree(tenant_id)
+        if not packed.get("demo"):
+            return packed
         fn = getattr(self._b, "tree", None) or getattr(self._b, "category_tree", None)
         if fn is None:
-            return {"tenant_id": tenant_id, "categories": [], "demo": False}
+            return packed
         r = fn(tenant_id)
         if hasattr(r, "__await__"):
             r = await r
-        return dict(r) if isinstance(r, dict) else {"categories": r}
+        out = dict(r) if isinstance(r, dict) else {"categories": r}
+        out.setdefault("demo", False)
+        out.setdefault("engine", "live")
+        return out
 
     async def search(self, tenant_id: str, query: str) -> list[dict[str, Any]]:
         fn = getattr(self._b, "search", None)
@@ -213,18 +242,28 @@ class LiveRag:
         return list(r or [])
 
     async def partitions(self, tenant_id: str) -> list[dict[str, Any]]:
+        from choruscontrol.services.taxonomy_rag import taxonomy_partitions
+
+        packed = taxonomy_partitions(tenant_id)
+        if not packed.get("demo"):
+            return list(packed.get("partitions") or [])
         fn = getattr(self._b, "partitions", None)
         if fn is None:
-            return []
+            return list(packed.get("partitions") or [])
         r = fn(tenant_id)
         if hasattr(r, "__await__"):
             r = await r
         return list(r or [])
 
     async def chunks_health(self, tenant_id: str) -> dict[str, Any]:
+        from choruscontrol.services.taxonomy_rag import taxonomy_chunks_health
+
+        packed = taxonomy_chunks_health(tenant_id)
+        if not packed.get("demo"):
+            return packed
         fn = getattr(self._b, "chunks_health", None)
         if fn is None:
-            return {"tenant_id": tenant_id, "decay": [], "demo": False}
+            return packed
         r = fn(tenant_id)
         if hasattr(r, "__await__"):
             r = await r
@@ -262,6 +301,28 @@ class LiveFabric:
         return int(r or 0)
 
 
+def _construct_cache() -> LiveCache | None:
+    """prismlib-plus installs as import package ``prism`` (not prismlib_plus)."""
+    try:
+        from prism.cache import HashEmbedder, InMemoryStore, PrismCache, PrismCacheConfig
+
+        backend = PrismCache(
+            PrismCacheConfig(tenant_id="choruscontrol-mother"),
+            HashEmbedder(),
+            InMemoryStore(),
+        )
+        return LiveCache(backend)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("live cache via prism.cache failed: %s", exc)
+    try:
+        from prismlib_plus import PrismCache  # type: ignore
+
+        return LiveCache(PrismCache())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("live cache via prismlib_plus failed: %s", exc)
+    return None
+
+
 def try_construct(logical: str) -> Any | None:
     ready, dist, ver = package_ready(logical)
     if not ready:
@@ -288,22 +349,14 @@ def try_construct(logical: str) -> Any | None:
             backend = getattr(chorusgraph, "ChorusGraph", None) or chorusgraph
             return LiveGraph(backend() if callable(backend) else backend)
         if logical == "rag":
-            try:
-                import prismrag_patch as ragmod  # type: ignore
-            except ImportError:
-                import prismrag as ragmod  # type: ignore
+            from choruscontrol.services.taxonomy_rag import construct_prismrag
 
-            backend = getattr(ragmod, "PrismRAG", None) or ragmod
-            return LiveRag(backend() if callable(backend) else backend)
+            backend = construct_prismrag(tenant_id="default")
+            if backend is None:
+                return None
+            return LiveRag(backend)
         if logical == "cache":
-            try:
-                from prismlib_plus import PrismCache  # type: ignore
-
-                return LiveCache(PrismCache())
-            except Exception:
-                import prismlib_plus as plp  # type: ignore
-
-                return LiveCache(plp)
+            return _construct_cache()
         if logical == "fabric":
             import chorus_fabric as cf  # type: ignore
 

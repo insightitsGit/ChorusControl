@@ -116,6 +116,23 @@ def prismrag_available() -> bool:
         return False
 
 
+def mapping_for_tenant(tenant_id: str) -> dict[str, Any]:
+    tid = tenant_id or "default"
+    if tid.startswith("aurora") or tid in ("aurora-health", "aurora-pharmacy"):
+        return _clinical_mapping()
+    return _default_mapping()
+
+
+def construct_prismrag(tenant_id: str = "default") -> Any | None:
+    """Build PrismRAG(mapping=…) for LiveRag / per-tenant clients (BUG-009)."""
+    if not prismrag_available():
+        return None
+    from prismrag_patch import PrismRAG
+
+    tid = tenant_id or "default"
+    return PrismRAG(mapping=mapping_for_tenant(tid), tenant_id=tid)
+
+
 def get_client(tenant_id: str) -> Any | None:
     """Lazy per-tenant PrismRAG client (MemoryStore). Returns None if package missing."""
     tid = tenant_id or "default"
@@ -124,16 +141,125 @@ def get_client(tenant_id: str) -> Any | None:
     with _lock:
         if tid in _clients:
             return _clients[tid]
-        from prismrag_patch import PrismRAG
-
-        mapping = (
-            _clinical_mapping()
-            if tid.startswith("aurora") or tid in ("aurora-health", "aurora-pharmacy")
-            else _default_mapping()
-        )
-        client = PrismRAG(mapping=mapping, tenant_id=tid)
+        client = construct_prismrag(tid)
+        if client is None:
+            return None
         _clients[tid] = client
         return client
+
+
+def taxonomy_tree(tenant_id: str) -> dict[str, Any]:
+    """Category tree from mapping + live communities (non-demo when PrismRAG present)."""
+    tid = tenant_id or "default"
+    ensure_seeded(tid)
+    client = get_client(tid)
+    mapping = mapping_for_tenant(tid)
+    categories = list(mapping.get("categories") or [])
+    if client is None:
+        return {
+            "tenant_id": tid,
+            "categories": categories,
+            "communities": [],
+            "engine": "null",
+            "demo": True,
+        }
+    communities = []
+    try:
+        communities = list(client.list_communities() or [])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("list_communities failed: %s", exc)
+    return {
+        "tenant_id": tid,
+        "categories": categories,
+        "communities": communities,
+        "engine": "prismrag-patch",
+        "demo": False,
+    }
+
+
+def taxonomy_partitions(tenant_id: str) -> dict[str, Any]:
+    """Partition list derived from mapping categories + chunk counts."""
+    tid = tenant_id or "default"
+    ensure_seeded(tid)
+    client = get_client(tid)
+    mapping = mapping_for_tenant(tid)
+    cats = list(mapping.get("categories") or [])
+    if client is None:
+        partitions = [
+            {
+                "partition": f"kb_{c.get('slug')}",
+                "version": 1,
+                "tenant_id": tid,
+                "status": "demo",
+                "label": c.get("label"),
+            }
+            for c in cats
+        ]
+        return {"partitions": partitions, "engine": "null", "demo": True, "tenant_id": tid}
+    counts: dict[str, int] = {}
+    try:
+        for ch in client.export_chunks() or []:
+            slug = ch.get("category_slug") or "markdown"
+            counts[slug] = counts.get(slug, 0) + 1
+    except Exception as exc:  # noqa: BLE001
+        log.warning("export_chunks failed: %s", exc)
+    partitions = []
+    for c in cats:
+        slug = c.get("slug") or "markdown"
+        partitions.append(
+            {
+                "partition": f"kb_{slug}",
+                "version": 1 + counts.get(slug, 0),
+                "tenant_id": tid,
+                "status": "ready",
+                "label": c.get("label"),
+                "chunk_count": counts.get(slug, 0),
+            }
+        )
+    if not partitions:
+        partitions.append(
+            {
+                "partition": "kb_markdown",
+                "version": 1 + sum(counts.values()),
+                "tenant_id": tid,
+                "status": "ready",
+                "chunk_count": sum(counts.values()),
+            }
+        )
+    return {
+        "partitions": partitions,
+        "engine": "prismrag-patch",
+        "demo": False,
+        "tenant_id": tid,
+    }
+
+
+def taxonomy_chunks_health(tenant_id: str) -> dict[str, Any]:
+    tid = tenant_id or "default"
+    ensure_seeded(tid)
+    client = get_client(tid)
+    if client is None:
+        return {"tenant_id": tid, "decay": [], "engine": "null", "demo": True}
+    decay = []
+    try:
+        for ch in client.export_chunks() or []:
+            decay.append(
+                {
+                    "chunk_ref": ch.get("chunk_ref"),
+                    "category_slug": ch.get("category_slug"),
+                    "age_hint": "fresh",
+                    "embedding_dim": len(ch.get("embedding") or []),
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("chunks_health export failed: %s", exc)
+    return {
+        "tenant_id": tid,
+        "decay": decay[:100],
+        "engine": "prismrag-patch",
+        "demo": False,
+        "count": len(decay),
+    }
 
 
 def ensure_seeded(tenant_id: str) -> dict[str, Any]:

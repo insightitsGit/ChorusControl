@@ -28,12 +28,14 @@ python scripts/inspect_wheel.py
 
 PowerShell: `pwsh scripts/build_release.ps1`
 
-## Publish checklist (v0.1.1)
+## Publish checklist (v0.1.2)
 
 ### Preflight
 
-- [x] Version `0.1.1` in `pyproject.toml`
+- [x] Version `0.1.2` in `pyproject.toml`
 - [x] Packaged `side1_public.hex` = prod ceremony public (BUG-007)
+- [x] Taxonomy LiveRag mapping + non-demo pack gate (HO-004/005)
+- [x] Pin tiers + install_hint + reference `docker/Dockerfile.mother` (HO-006)
 - [x] Apache-2.0 `LICENSE` + project classifiers
 - [x] Wheel includes UI static/templates + `side1_public.pem` / `.hex`
 - [x] `twine check` passes

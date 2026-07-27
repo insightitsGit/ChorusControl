@@ -155,13 +155,14 @@ class FleetRegistry:
         rows = await self.store.fetchall("SELECT * FROM nodes WHERE revoked=0 ORDER BY last_seen DESC")
         out = []
         for r in rows:
-            out.append(
-                {
-                    **r,
-                    "products": json.loads(r["products_json"]),
-                    "online": (time.time() - r["last_seen"]) < 30,
-                }
-            )
+            item = {
+                **r,
+                "products": json.loads(r["products_json"]),
+                "online": (time.time() - r["last_seen"]) < 30,
+            }
+            # BUG-008 — never expose session secrets on list/topology APIs
+            item.pop("session_secret", None)
+            out.append(item)
         return out
 
     async def revoke(self, node_id: str) -> None:

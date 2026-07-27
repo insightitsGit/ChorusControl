@@ -2,15 +2,15 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.1-informational)](https://github.com/insightitsGit/ChorusControl)
+[![Version](https://img.shields.io/badge/version-0.1.2-informational)](https://github.com/insightitsGit/ChorusControl)
 [![CI](https://img.shields.io/badge/tests-51%20passing-brightgreen)](https://github.com/insightitsGit/ChorusControl)
 
 **AI Operations Platform for the Prism / Chorus stack — mother control plane + lightweight fleet agents.**  
 Govern, observe, and correct production AI fleets without putting Side 1 (billing) or phone-home inside the customer VPC.
 
 ```bash
-# After v0.1.1 is on PyPI:
-pip install "choruscontrol[server,agent]==0.1.1"
+# After v0.1.2 is on PyPI:
+pip install "choruscontrol[server,postgres,prism]==0.1.2"
 
 # Until then (or for tip-of-main):
 # pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
@@ -63,9 +63,12 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 ### Customer path (after pip)
 
 1. Buy **Enterprise** (CONTROL) → paste `CHORUSCONTROL_LICENSE_KEY`.  
-2. `pip install "choruscontrol[server,agent]==0.1.1"`  
+2. **Production:** `pip install "choruscontrol[server,postgres,prism]==0.1.2"`  
+   **Demo only:** `pip install "choruscontrol[server]==0.1.2"` + `DEMO_MODE=1`  
 3. `choruscontrol serve` → **mother = dashboard + API** at `/overview` (you host it; we do not).  
 4. Optional: `choruscontrol-agent` on workers with a join token from Admin.
+
+See [doc/INSTALL-MOTHER.md](doc/INSTALL-MOTHER.md) for profiles, pin tiers, and reference Docker.
 
 ---
 

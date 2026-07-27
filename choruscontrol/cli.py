@@ -26,7 +26,12 @@ def _doctor_exit_code(payload: dict) -> int:
     pin_list = pins.get("pins") if isinstance(pins, dict) else None
     if isinstance(pin_list, list):
         for p in pin_list:
-            if isinstance(p, dict) and p.get("installed") and not p.get("ok", True):
+            if (
+                isinstance(p, dict)
+                and p.get("tier", "core") == "core"
+                and p.get("installed")
+                and not p.get("ok", True)
+            ):
                 return 1
     return 0
 
@@ -121,6 +126,12 @@ def main() -> None:
                     doc = await doctor_mother(state)
                     doc["store_writable"] = store_writable
                     print(json.dumps(doc, indent=2, default=str))
+                    hint = doc.get("install_hint")
+                    if hint:
+                        print(f"\n# install_hint: {hint}", file=sys.stderr)
+                    missing = (doc.get("pins") or {}).get("missing_core") or []
+                    if missing and not doc.get("demo_mode"):
+                        print(f"# missing_core: {', '.join(missing)}", file=sys.stderr)
                     return _doctor_exit_code(doc)
                 finally:
                     if state.metrics_sampler:

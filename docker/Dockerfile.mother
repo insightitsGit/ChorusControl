@@ -1,0 +1,23 @@
+# Mother — production reference (HO-006)
+# pip install "choruscontrol[server,postgres,prism]==<ver>"
+FROM python:3.12-slim AS builder
+WORKDIR /build
+COPY pyproject.toml README.md LICENSE ./
+COPY choruscontrol ./choruscontrol
+COPY scripts ./scripts
+RUN pip install --no-cache-dir --prefix=/install ".[server,agent,postgres,prism]"
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /install /usr/local
+COPY choruscontrol ./choruscontrol
+ENV PYTHONPATH=/app
+ENV CHORUSCONTROL_DEMO_MODE=0
+# Require at runtime:
+#   CHORUSCONTROL_ADMIN_TOKEN  (strong, ≥16 chars)
+#   CHORUSCONTROL_LICENSE_KEY  (Side 1 JWT)
+# Optional:
+#   DATABASE_URL=postgresql://...
+#   CHORUSCONTROL_LICENSE_ONLINE_CHECK=1
+EXPOSE 8443
+CMD ["choruscontrol", "serve", "--host", "0.0.0.0", "--port", "8443"]

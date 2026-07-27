@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from choruscontrol.adapters.pins import package_version
 from choruscontrol.app_state import build_state
 from choruscontrol.api.routes import router
 from choruscontrol.config import get_settings
@@ -26,7 +27,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title=settings.product_title, version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title=settings.product_title, version=package_version(), lifespan=lifespan)
     app.include_router(router)
 
     ui_dir = Path(__file__).parent / "ui"

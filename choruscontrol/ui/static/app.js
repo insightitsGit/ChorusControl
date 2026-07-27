@@ -1538,16 +1538,41 @@ async function renderAdmin(payload) {
           <tr><td>OIDC</td><td>${doctor.oidc_enabled ? status(true, "enabled") : status(true, "token only")}</td></tr>
         </tbody></table>
         <div class="section-head" style="margin-top:1rem"><h2 style="font-size:0.9rem">Pin floors</h2></div>
-        <table class="data"><thead><tr><th>Package</th><th>Floor</th><th>Status</th></tr></thead><tbody>${
-          pins
+        ${
+          doctor.install_hint
+            ? `<p class="score-meta" style="margin:0.5rem 0">Install: <code>${doctor.install_hint}</code></p>`
+            : ""
+        }
+        <table class="data"><thead><tr><th>Package</th><th>Floor</th><th>Installed</th><th>Tier</th><th>Status</th></tr></thead><tbody>${
+          (doctor.pins?.pins || [])
             .map(
               (p) =>
-                `<tr><td>${p.package}</td><td>${p.floor}</td><td>${
-                  p.ok ? status(true, "ok") : status(false, p.status)
+                `<tr><td>${p.package}</td><td>${p.floor}</td><td>${p.installed || "—"}</td><td>${
+                  p.tier || "—"
+                }</td><td>${
+                  p.ok
+                    ? status(true, "ok")
+                    : status(p.tier !== "core", p.status || "missing")
                 }</td></tr>`
             )
-            .join("") || `<tr><td colspan="3" class="empty">No pin report</td></tr>`
-        }</tbody></table>`,
+            .join("") || `<tr><td colspan="5" class="empty">No pin report</td></tr>`
+        }</tbody></table>
+        ${
+          doctor.taxonomy_packs
+            ? `<p class="score-meta" style="margin-top:0.75rem">Taxonomy packs: ${
+                doctor.taxonomy_packs.ready
+                  ? status(true, "ready")
+                  : status(false, "not ready")
+              } ${
+                doctor.taxonomy_packs.install_hint
+                  ? `· <code>${doctor.taxonomy_packs.install_hint}</code>`
+                  : ""
+              }</p>`
+            : ""
+        }
+        <table class="data" style="margin-top:0.75rem"><tbody>
+          <tr><td>Package version</td><td><code>${doctor.version || "—"}</code></td></tr>
+        </tbody></table>`,
         "Mother health",
         60
       )}
@@ -1821,6 +1846,23 @@ async function load() {
       lastRender = () => renderTrace(payload);
       await renderTrace(payload);
     } else if (tab === "taxonomy") {
+      const authMeta = await soft("/api/v1/admin/auth", {});
+      if (authMeta && authMeta.demo_mode === false && authMeta.taxonomy_ready === false) {
+        const hint =
+          authMeta.taxonomy_packs?.install_hint ||
+          'pip install "choruscontrol[server,prism]"';
+        const msgs = (authMeta.taxonomy_packs?.messages || []).join(" · ") || "PrismRAG + PrismGuard required";
+        actions.innerHTML = "";
+        view.innerHTML = section(
+          "Taxonomy unavailable",
+          `<p style="margin:0 0 0.75rem">${msgs}</p>
+           <p class="score-meta">When <code>DEMO_MODE=0</code>, Taxonomy does not fall back to NullRAG DEMO.</p>
+           <p style="margin-top:1rem">Install: <code>${hint}</code></p>`,
+          "Requires choruscontrol[prism]"
+        );
+        lastRender = null;
+        return;
+      }
       let taxTenant = "default";
       try {
         const tenants = await soft("/api/v1/admin/tenants", { tenants: [] });

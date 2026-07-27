@@ -16,6 +16,7 @@ from choruscontrol.license.stack import stack_license_status
 from choruscontrol.license.store import save_stored_license
 from choruscontrol.services.caps import aggregate_caps, compute_ai_score, fleet_role_color, policy_drift
 from choruscontrol.services.doctor import doctor_mother
+from choruscontrol.adapters.pins import taxonomy_packs_ready
 from choruscontrol.services.graph import (
     assistant_ask,
     blast_radius,
@@ -100,6 +101,23 @@ def _redact_license_claims(claims: dict[str, Any] | None) -> dict[str, Any] | No
         "max_tenants": claims.get("max_tenants"),
         "features": features,
     }
+
+
+def _require_taxonomy_packs(request: Request) -> dict[str, Any]:
+    """HO-005: non-demo Taxonomy requires PrismRAG + PrismGuard (no silent DEMO)."""
+    s = state(request)
+    tax = taxonomy_packs_ready()
+    if s.settings.demo_mode or tax["ready"]:
+        return tax
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "TAXONOMY_PACKS_REQUIRED",
+            "message": "Taxonomy requires PrismRAG + PrismGuard when DEMO_MODE=0",
+            "taxonomy_packs": tax,
+            "install_hint": tax.get("install_hint"),
+        },
+    )
 
 
 class CascadeBody(BaseModel):
@@ -819,11 +837,15 @@ async def cortex_resolve(request: Request, principal=require_role("operator")):
 
 @router.get("/taxonomy/tree")
 async def taxonomy_tree(request: Request, tenant_id: str = "default", _=require_role("viewer")):
-    return await state(request).rag.tree(tenant_id)
+    _require_taxonomy_packs(request)
+    from choruscontrol.services.taxonomy_rag import taxonomy_tree as tree_fn
+
+    return tree_fn(tenant_id)
 
 
 @router.post("/taxonomy/search")
 async def taxonomy_search(request: Request, _=require_role("viewer")):
+    _require_taxonomy_packs(request)
     from choruscontrol.services.taxonomy_rag import search_term
 
     body = await request.json()
@@ -831,7 +853,7 @@ async def taxonomy_search(request: Request, _=require_role("viewer")):
     query = body.get("query", "")
     top_k = int(body.get("top_k") or 8)
     category_filter = body.get("category_filter")
-    # Pre-await NullRAG fallback hits when PrismRAG is unavailable
+    # Pre-await NullRAG fallback hits when PrismRAG is unavailable (demo only)
     fallback_hits = await state(request).rag.search(tid, query)
     return search_term(
         tid,
@@ -844,6 +866,7 @@ async def taxonomy_search(request: Request, _=require_role("viewer")):
 
 @router.post("/taxonomy/related")
 async def taxonomy_related(request: Request, _=require_role("viewer")):
+    _require_taxonomy_packs(request)
     from choruscontrol.services.taxonomy_rag import related_terms
 
     body = await request.json()
@@ -854,6 +877,7 @@ async def taxonomy_related(request: Request, _=require_role("viewer")):
 async def taxonomy_list_chunks(
     request: Request, tenant_id: str = "default", _=require_role("viewer")
 ):
+    _require_taxonomy_packs(request)
     from choruscontrol.services.taxonomy_rag import list_chunks
 
     return list_chunks(tenant_id)
@@ -862,6 +886,7 @@ async def taxonomy_list_chunks(
 @router.post("/taxonomy/chunks/overwrite")
 async def taxonomy_overwrite_chunk(request: Request, principal=require_role("admin")):
     """Online overwrite a chunk via PrismRAG.append_chunks (upsert by ref)."""
+    _require_taxonomy_packs(request)
     from choruscontrol.services.taxonomy_rag import overwrite_chunk
 
     s = state(request)
@@ -903,16 +928,25 @@ async def taxonomy_overwrite_chunk(request: Request, principal=require_role("adm
 
 @router.get("/taxonomy/partitions")
 async def taxonomy_partitions(request: Request, tenant_id: str = "default", _=require_role("viewer")):
-    return {"partitions": await state(request).rag.partitions(tenant_id)}
+    _require_taxonomy_packs(request)
+    from choruscontrol.services.taxonomy_rag import taxonomy_partitions as parts_fn
+
+    return parts_fn(tenant_id)
 
 
 @router.get("/taxonomy/chunks/health")
 async def taxonomy_chunks(request: Request, tenant_id: str = "default", _=require_role("viewer")):
+    _require_taxonomy_packs(request)
     s = state(request)
+    from choruscontrol.services.taxonomy_rag import taxonomy_chunks_health
+
+    live = taxonomy_chunks_health(tenant_id)
+    if not live.get("demo"):
+        return live
     fn = getattr(s.rag, "chunks_health", None)
     if fn:
         return await fn(tenant_id)
-    return {"tenant_id": tenant_id, "decay": [], "demo": True}
+    return live
 
 
 # --- Guard ---
@@ -1215,6 +1249,7 @@ async def admin_doctor(request: Request, _=require_role("admin")):
 async def admin_auth(request: Request):
     """Auth modes available. In demo_mode, include token hint so UI can self-heal."""
     s = state(request).settings
+    tax = taxonomy_packs_ready()
     out = {
         "local_token": True,
         "oidc_enabled": s.oidc_enabled,
@@ -1222,6 +1257,8 @@ async def admin_auth(request: Request):
         "oidc_audience": s.oidc_audience,
         "oidc_role_claim": s.oidc_role_claim,
         "demo_mode": s.demo_mode,
+        "taxonomy_packs": tax,
+        "taxonomy_ready": bool(s.demo_mode or tax["ready"]),
         "formats": [
             "Bearer <ADMIN_TOKEN>",
             "Bearer <ADMIN_TOKEN>:<role>",
