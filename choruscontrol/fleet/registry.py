@@ -106,6 +106,19 @@ class FleetRegistry:
         await self._mirror_node(nid)
         return {"node_id": nid, "session_secret": session_secret}
 
+    async def require_session(self, node_id: str, session_secret: str | None) -> dict[str, Any]:
+        """Authenticate agent write paths (BUG-004). Uses secrets.compare_digest."""
+        import secrets
+
+        row = await self.store.fetchone("SELECT * FROM nodes WHERE node_id=?", (node_id,))
+        if not row or row["revoked"]:
+            raise ValueError("unknown or revoked node")
+        expected = row["session_secret"] or ""
+        provided = session_secret or ""
+        if not expected or not provided or not secrets.compare_digest(expected, provided):
+            raise ValueError("invalid session")
+        return dict(row)
+
     async def heartbeat(
         self,
         *,
@@ -116,11 +129,8 @@ class FleetRegistry:
         role: str | None = None,
         memory_endpoint: str | None = None,
     ) -> None:
-        row = await self.store.fetchone("SELECT * FROM nodes WHERE node_id=?", (node_id,))
-        if not row or row["revoked"]:
-            raise ValueError("unknown or revoked node")
-        if row["session_secret"] != session_secret:
-            raise ValueError("invalid session")
+        row = await self.require_session(node_id, session_secret)
+        _ = row
         day = time.strftime("%Y-%m-%d", time.gmtime())
         if memory_endpoint is not None:
             await self.store.execute(

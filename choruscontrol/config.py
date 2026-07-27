@@ -18,12 +18,18 @@ class Settings(BaseSettings):
     demo_mode: bool = Field(default=False, alias="CHORUSCONTROL_DEMO_MODE")
 
     license_key: str | None = Field(default=None, alias="CHORUSCONTROL_LICENSE_KEY")
+    # Side 1 trust anchor (PEM text or 32-byte public hex from ceremony --public)
+    license_public_pem: str | None = Field(default=None, alias="CHORUSCONTROL_LICENSE_PUBLIC_PEM")
+    license_public_key_hex: str | None = Field(
+        default=None, alias="CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX"
+    )
     license_grace_days: int = Field(default=14, alias="CHORUSCONTROL_LICENSE_GRACE_DAYS")
     license_clock_skew_seconds: int = Field(
         default=86400, alias="CHORUSCONTROL_LICENSE_CLOCK_SKEW_SECONDS"
     )
 
-    admin_token: str = Field(default="dev-admin-token", alias="CHORUSCONTROL_ADMIN_TOKEN")
+    # Empty default — must set in prod; demo compose sets explicitly
+    admin_token: str = Field(default="", alias="CHORUSCONTROL_ADMIN_TOKEN")
     audit_private_key_pem: str | None = Field(
         default=None, alias="CHORUSCONTROL_AUDIT_PRIVATE_KEY_PEM"
     )

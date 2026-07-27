@@ -21,7 +21,7 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 | § | Subsystem | Status | Where / Notes |
 |---|-----------|--------|---------------|
 | 3.1 | Deployment boundary | ✅ | extras; no phone-home |
-| 3.2 | Offline license protocol | ✅ | verify/grace/max_nodes/max_tenants + `require_feature` + upload store |
+| 3.2 | Offline license protocol | ✅ | pinned Side 1 pubkey + grace + `require_feature`; optional 14d online validate; **no** non-demo auto-issue (HO-001) |
 | 3.3 | Identity & RBAC | ✅ | local token + OIDC; user CRUD UI out of scope |
 | 3.4 | Invalidation bus | ✅ | broadcaster + ACKs; Fabric live still optional stub |
 | 3.5 | Maintenance job queue | ✅ | sleep/reindex/warm + `cascade.run` + `compliance.scan` |

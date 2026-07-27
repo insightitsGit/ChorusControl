@@ -637,7 +637,9 @@ async function renderOverview(payload) {
     try {
       if (!window._ccFleetWs) {
         const proto = location.protocol === "https:" ? "wss" : "ws";
-        const ws = new WebSocket(`${proto}://${location.host}/api/v1/fleet/live`);
+        const ws = new WebSocket(
+          `${proto}://${location.host}/api/v1/fleet/live?token=${encodeURIComponent(token || "")}`
+        );
         window._ccFleetWs = ws;
         ws.onmessage = (ev) => {
           try {

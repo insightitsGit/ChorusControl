@@ -56,8 +56,23 @@ def main() -> None:
         import uvicorn
 
         from choruscontrol.config import get_settings
+        from choruscontrol.config_security import admin_token_is_weak
 
         s = get_settings()
+        if not s.demo_mode and admin_token_is_weak(s.admin_token):
+            print(
+                "Refusing to serve: set a strong CHORUSCONTROL_ADMIN_TOKEN "
+                "(≥16 chars, not the legacy default) or enable CHORUSCONTROL_DEMO_MODE=1 "
+                "for local demos only.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        if not s.demo_mode and not (s.license_key or "").strip():
+            # Soft warning — middleware fail-closes APIs; allow boot so Admin can install a key
+            print(
+                "WARNING: CHORUSCONTROL_LICENSE_KEY unset — APIs will 503 until a Side 1 JWT is installed.",
+                file=sys.stderr,
+            )
         uvicorn.run(
             "choruscontrol.server:app",
             host=args.host or s.host,

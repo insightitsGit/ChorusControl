@@ -18,6 +18,7 @@ class LedgerExporter:
         *,
         node_id: str,
         tenant_id: str,
+        session_secret: str | None = None,
         max_queue: int = 1000,
         batch_size: int = 50,
         flush_interval: float = 2.0,
@@ -25,6 +26,7 @@ class LedgerExporter:
         self.mother_url = mother_url.rstrip("/")
         self.node_id = node_id
         self.tenant_id = tenant_id
+        self.session_secret = session_secret or ""
         self.max_queue = max_queue
         self.batch_size = batch_size
         self.flush_interval = flush_interval
@@ -82,6 +84,7 @@ class LedgerExporter:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 r = await client.post(
                     f"{self.mother_url}/api/v1/fleet/ledger-batch",
+                    headers={"X-Node-Session": self.session_secret},
                     json={
                         "node_id": self.node_id,
                         "tenant_id": self.tenant_id,

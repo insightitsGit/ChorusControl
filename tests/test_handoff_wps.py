@@ -50,9 +50,13 @@ async def test_wp1_feature_gates(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         demo=False,
-        extra_env={"CHORUSCONTROL_LICENSE_KEY": token},
+        extra_env={
+            "CHORUSCONTROL_LICENSE_KEY": token,
+            "CHORUSCONTROL_LICENSE_PUBLIC_PEM": vmod.DEV_PUBLIC_PEM,
+            "CHORUSCONTROL_ADMIN_TOKEN": "strong-admin-token-32chars!!",
+        },
     )
-    h = {"Authorization": "Bearer dev-admin-token"}
+    h = {"Authorization": "Bearer strong-admin-token-32chars!!"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         async with app.router.lifespan_context(app):
             # seed a trace then replay should 403
@@ -97,9 +101,16 @@ async def test_wp2_tenants_max(tmp_path, monkeypatch):
     )
     token = v.issue_dev_token(claims, private)
     app = _app_client(
-        tmp_path, monkeypatch, demo=False, extra_env={"CHORUSCONTROL_LICENSE_KEY": token}
+        tmp_path,
+        monkeypatch,
+        demo=False,
+        extra_env={
+            "CHORUSCONTROL_LICENSE_KEY": token,
+            "CHORUSCONTROL_LICENSE_PUBLIC_PEM": vmod.DEV_PUBLIC_PEM,
+            "CHORUSCONTROL_ADMIN_TOKEN": "strong-admin-token-32chars!!",
+        },
     )
-    h = {"Authorization": "Bearer dev-admin-token"}
+    h = {"Authorization": "Bearer strong-admin-token-32chars!!"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         async with app.router.lifespan_context(app):
             # default already seeded → 1 tenant; one more ok; third fails
@@ -251,7 +262,7 @@ async def test_wp7_fleet_live_ws(tmp_path, monkeypatch):
     app = _app_client(tmp_path, monkeypatch, demo=True)
     h = {"Authorization": "Bearer dev-admin-token"}
     with TestClient(app) as client:
-        with client.websocket_connect("/api/v1/fleet/live") as ws:
+        with client.websocket_connect("/api/v1/fleet/live?token=dev-admin-token") as ws:
             hello = ws.receive_json()
             assert hello["type"] == "snapshot"
             tok = client.post("/api/v1/fleet/join-tokens", headers=h, json={})
@@ -359,8 +370,10 @@ async def test_wp9_trace_purge_and_sampled(tmp_path, monkeypatch):
                     "products": {"chorusgraph": "1.3.0"},
                 },
             )
+            session = joined.json()["session_secret"]
             await c.post(
                 "/api/v1/fleet/ledger-batch",
+                headers={"X-Node-Session": session},
                 json={
                     "node_id": "samp",
                     "tenant_id": "default",

@@ -24,7 +24,9 @@ services:
       retries: 10
 
   mother:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
     ports:
       - "8443:8443"
     depends_on:

@@ -1,6 +1,7 @@
+"""License Ed25519 verify + optional demo issuance (tests/demo only)."""
+
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -11,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import BaseModel, Field
 
 
-# Dev/public keypair for offline tests (NOT for production issuance — Side 1 holds prod private).
+# Ephemeral keypair for *demo/test issuance only* — never the production trust anchor.
 _DEV_PRIVATE = ed25519.Ed25519PrivateKey.generate()
 DEV_PUBLIC_PEM = _DEV_PRIVATE.public_key().public_bytes(
     encoding=serialization.Encoding.PEM,
@@ -69,13 +70,24 @@ class LicenseVerifier:
         public_pem: str | None = None,
         grace_days: int = 14,
         clock_skew_seconds: int = 86400,
+        *,
+        key_source: str = "explicit",
     ) -> None:
-        self.public_pem = public_pem or DEV_PUBLIC_PEM
+        if public_pem is None:
+            # Prefer pinned Side 1 trust anchor — never silently use ephemeral DEV.
+            from choruscontrol.license.keys import resolve_verify_public_pem
+
+            public_pem, key_source = resolve_verify_public_pem()
+        self.public_pem = public_pem
+        self.key_source = key_source
         self.grace_days = grace_days
         self.clock_skew_seconds = clock_skew_seconds
         self._public = serialization.load_pem_public_key(self.public_pem.encode())
 
-    def issue_dev_token(self, claims: LicenseClaims, private: ed25519.Ed25519PrivateKey | None = None) -> str:
+    def issue_dev_token(
+        self, claims: LicenseClaims, private: ed25519.Ed25519PrivateKey | None = None
+    ) -> str:
+        """Issue a JWT for demo/tests. Production issuance is Side 1 only."""
         key = private or _DEV_PRIVATE
         payload = claims.model_dump()
         payload["features"] = sorted(payload["features"])
@@ -102,9 +114,7 @@ class LicenseVerifier:
 
         seconds_to_exp = claims.exp - now
         if seconds_to_exp >= -skew:
-            # still within exp (+skew)
             if seconds_to_exp < 0:
-                # inside skew after exp — treat valid
                 return LicenseStatus("valid", claims, "valid (within clock skew)", seconds_to_exp)
             return LicenseStatus("valid", claims, "valid", seconds_to_exp)
 
@@ -124,6 +134,5 @@ class LicenseVerifier:
         if status.state not in ("valid", "grace") or not status.claims:
             return False
         if status.state == "grace":
-            # grace: allow read features only
             return feature.startswith("caps.") or feature in {"fleet.topology"}
         return feature in status.claims.features

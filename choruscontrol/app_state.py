@@ -84,12 +84,31 @@ async def build_state(settings: Settings) -> AppState:
         pass
     await ensure_default_tenant(store)
 
+    verifier_pem, key_source = None, "unset"
+    if settings.demo_mode:
+        from choruscontrol.license.verifier import DEV_PUBLIC_PEM
+
+        verifier_pem, key_source = DEV_PUBLIC_PEM, "dev"
+    else:
+        from choruscontrol.license.keys import resolve_verify_public_pem
+
+        verifier_pem, key_source = resolve_verify_public_pem(
+            public_pem=settings.license_public_pem,
+            public_key_hex=settings.license_public_key_hex,
+            demo_mode=False,
+        )
+
     verifier = LicenseVerifier(
+        public_pem=verifier_pem,
         grace_days=settings.license_grace_days,
         clock_skew_seconds=settings.license_clock_skew_seconds,
+        key_source=key_source,
     )
+    log.info("license trust anchor source=%s", key_source)
+
     resolved = resolve_license_key(settings)
-    if settings.demo_mode or not resolved:
+    # BUG-002: only auto-issue a demo JWT when DEMO_MODE=1 — never when key missing in prod
+    if settings.demo_mode and not resolved:
         from choruscontrol.license import LicenseClaims
 
         now = int(time.time())

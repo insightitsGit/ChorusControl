@@ -96,6 +96,7 @@ class AgentRuntime:
             self.settings.mother_url or "",
             node_id=self.node_id or "unknown",
             tenant_id=self.settings.tenant_id,
+            session_secret=self.session_secret,
         )
         self.ledger.start()
         log.info("joined mother as %s", self.node_id)
@@ -216,6 +217,7 @@ class AgentRuntime:
         await self.transport.ack(
             {
                 "node_id": self.node_id,
+                "session_secret": self.session_secret,
                 "command_id": cmd.get("command_id"),
                 "cascade_id": cmd.get("cascade_id"),
                 "status": status,

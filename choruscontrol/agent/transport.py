@@ -38,12 +38,24 @@ class HttpControlTransport:
             return r.json().get("commands", [])
 
     async def ack(self, payload: dict[str, Any]) -> None:
+        session = payload.get("session_secret") or ""
+        headers = {"X-Node-Session": session} if session else {}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            await client.post(f"{self.mother_url}/api/v1/fleet/ack", json=payload)
+            r = await client.post(
+                f"{self.mother_url}/api/v1/fleet/ack", json=payload, headers=headers
+            )
+            r.raise_for_status()
 
     async def ledger_batch(self, payload: dict[str, Any]) -> None:
+        session = payload.get("session_secret") or ""
+        headers = {"X-Node-Session": session} if session else {}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            await client.post(f"{self.mother_url}/api/v1/fleet/ledger-batch", json=payload)
+            r = await client.post(
+                f"{self.mother_url}/api/v1/fleet/ledger-batch",
+                json=payload,
+                headers=headers,
+            )
+            r.raise_for_status()
 
 
 class FabricControlTransport:

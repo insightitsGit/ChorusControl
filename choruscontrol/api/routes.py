@@ -423,9 +423,10 @@ async def fleet_heartbeat(body: HeartbeatBody, request: Request):
 @router.get("/fleet/nodes/{node_id}/commands")
 async def get_commands(node_id: str, request: Request, x_node_session: str = Header()):
     s = state(request)
-    row = await s.store.fetchone("SELECT session_secret, revoked FROM nodes WHERE node_id=?", (node_id,))
-    if not row or row["revoked"] or row["session_secret"] != x_node_session:
-        raise HTTPException(401, detail="unauthorized node")
+    try:
+        await s.fleet.require_session(node_id, x_node_session)
+    except ValueError as exc:
+        raise HTTPException(401, detail=str(exc)) from exc
     cmds = s.pending_commands.pop(node_id, [])
     return {"commands": cmds}
 
@@ -463,18 +464,31 @@ async def dispatch_command(node_id: str, request: Request, principal=require_rol
 
 
 @router.post("/fleet/ack")
-async def fleet_ack(request: Request):
+async def fleet_ack(request: Request, x_node_session: str | None = Header(default=None)):
     s = state(request)
     body = await request.json()
+    node_id = body.get("node_id")
+    if not node_id:
+        raise HTTPException(400, detail="node_id required")
+    try:
+        await s.fleet.require_session(node_id, x_node_session)
+    except ValueError as exc:
+        raise HTTPException(401, detail=str(exc)) from exc
     if body.get("cascade_id"):
-        await s.cascade.record_ack(body["cascade_id"], body.get("node_id", "?"), body.get("status", "ok"))
-    await s.broadcast_fleet({"type": "ack", "node_id": body.get("node_id"), "ts": time.time(), "body": body})
+        await s.cascade.record_ack(body["cascade_id"], node_id, body.get("status", "ok"))
+    await s.broadcast_fleet({"type": "ack", "node_id": node_id, "ts": time.time(), "body": body})
     return {"ok": True}
 
 
 @router.post("/fleet/ledger-batch")
-async def ledger_batch(body: LedgerBatchBody, request: Request):
+async def ledger_batch(
+    body: LedgerBatchBody, request: Request, x_node_session: str | None = Header(default=None)
+):
     s = state(request)
+    try:
+        await s.fleet.require_session(body.node_id, x_node_session)
+    except ValueError as exc:
+        raise HTTPException(401, detail=str(exc)) from exc
     kept = 0
     for entry in body.entries:
         stage = (entry.get("stage") or "").lower()
@@ -498,7 +512,6 @@ async def ledger_batch(body: LedgerBatchBody, request: Request):
             ),
         )
         kept += 1
-        # notify WS subscribers
         for ws in list(s.trace_subscribers):
             try:
                 await ws.send_json(entry)
@@ -1568,12 +1581,31 @@ async def traces_seed(request: Request, principal=require_role("operator")):
 
 @router.websocket("/fleet/live")
 async def fleet_live(websocket: WebSocket):
-    await websocket.accept()
+    """Viewer+ bearer required (query ?token= or Authorization). BUG-004."""
+    from choruscontrol.auth.rbac import ROLE_RANK, parse_bearer
+
     app = websocket.app
     cc = getattr(app.state, "cc", None)
     if cc is None:
-        await websocket.close()
+        await websocket.close(code=1011)
         return
+    auth = websocket.headers.get("authorization") or ""
+    token = websocket.query_params.get("token") or ""
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip() or token
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        principal = parse_bearer(f"Bearer {token}", cc.settings.admin_token)
+        if ROLE_RANK.get(principal.role, 0) < ROLE_RANK["viewer"]:
+            await websocket.close(code=4403)
+            return
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
     cc.fleet_subscribers.append(websocket)
     try:
         nodes = await cc.fleet.list_nodes()

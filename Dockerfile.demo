@@ -1,4 +1,4 @@
-# Mother — production-oriented image (BUG-003: no DEMO_MODE default)
+# Demo mother image — explicit DEMO_MODE for local compose only (BUG-003)
 FROM python:3.12-slim AS builder
 WORKDIR /build
 COPY pyproject.toml README.md ./
@@ -12,9 +12,7 @@ COPY --from=builder /install /usr/local
 COPY choruscontrol ./choruscontrol
 COPY scripts ./scripts
 COPY pyproject.toml README.md ./
-# Require CHORUSCONTROL_ADMIN_TOKEN + CHORUSCONTROL_LICENSE_KEY at runtime.
-# Demo: use docker-compose.healthcare.yml (sets DEMO_MODE=1) or Dockerfile.demo.
 ENV PYTHONPATH=/app
-ENV CHORUSCONTROL_DEMO_MODE=0
+ENV CHORUSCONTROL_DEMO_MODE=1
 EXPOSE 8443
 CMD ["choruscontrol", "serve", "--host", "0.0.0.0", "--port", "8443"]
