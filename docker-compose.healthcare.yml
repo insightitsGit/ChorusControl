@@ -1,8 +1,6 @@
 # Aurora Health — full-stack local demo
-# Mother + Postgres (optional) + clinical / pharmacy / edge agents + scenario seed
+# Mother + Postgres audit + clinical / pharmacy / edge agents + scenario seed
 #
-#   docker compose -f docker-compose.healthcare.yml --profile postgres up --build
-#   # or without Postgres:
 #   docker compose -f docker-compose.healthcare.yml up --build
 #
 # UI: http://127.0.0.1:8443/overview
@@ -11,7 +9,6 @@
 services:
   postgres:
     image: postgres:16-alpine
-    profiles: ["postgres"]
     environment:
       POSTGRES_USER: cc
       POSTGRES_PASSWORD: cc
@@ -30,6 +27,9 @@ services:
     build: .
     ports:
       - "8443:8443"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       CHORUSCONTROL_DEMO_MODE: "1"
       CHORUSCONTROL_ADMIN_TOKEN: "healthcare-demo-token"
@@ -39,8 +39,7 @@ services:
       CHORUSCONTROL_ALLOW_INSECURE_EXTERNAL: "1"
       CHORUSCONTROL_LEDGER_SAMPLE_RATE: "1.0"
       CHORUSCONTROL_METRICS_SAMPLE_INTERVAL: "5"
-      # Uncomment when using: --profile postgres
-      # DATABASE_URL: postgresql://cc:cc@postgres:5432/choruscontrol
+      DATABASE_URL: postgresql://cc:cc@postgres:5432/choruscontrol
       CHORUSGRAPH_LICENSE_KEY: ""
       PRISMGUARD_LICENSE_KEY: ""
     volumes:
@@ -126,7 +125,6 @@ services:
       CHORUSCONTROL_NODE_ROLE: ORANGE
       CHORUSCONTROL_TENANT_ID: aurora-health
       CHORUSCONTROL_NETWORK_ZONE: external
-      CHORUSCONTROL_ALLOW_INSECURE_EXTERNAL: "1"
       CHORUSCONTROL_HEARTBEAT_INTERVAL: "5"
       JOIN_TOKEN_FILE: /shared/join_token
     volumes:

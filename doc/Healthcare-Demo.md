@@ -1,8 +1,7 @@
 # Aurora Health — local full-stack demo
 
-Healthcare-domain scenario for ChorusControl (Side 2): mother UI/API, three fleet agents
-(clinical GREEN, pharmacy BLUE, edge ORANGE), clinical Guard policy, DEMO med-recon cascade,
-incidents, traces, and optional Postgres audit.
+Mother + **Postgres audit dual-write** + three fleet agents (clinical GREEN, pharmacy BLUE, edge ORANGE),
+clinical Guard policy, DEMO med-recon cascade, incidents, traces.
 
 > **DEMO only.** No real PHI. Lexicon and traces are labeled illustrative.
 
@@ -10,13 +9,6 @@ incidents, traces, and optional Postgres audit.
 
 ```bash
 docker compose -f docker-compose.healthcare.yml up --build
-```
-
-With Postgres audit dual-write:
-
-```bash
-# Edit docker-compose.healthcare.yml mother env: uncomment DATABASE_URL
-docker compose -f docker-compose.healthcare.yml --profile postgres up --build
 ```
 
 Open:
