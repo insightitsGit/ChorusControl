@@ -18,6 +18,8 @@ data/
 choruscontrol_audit.jsonl
 **/license.key
 *.pem
+!choruscontrol/license/side1_public.pem
+!tests/fixtures/side1_*.pem
 !doc/**/*.md
 
 # Tools
