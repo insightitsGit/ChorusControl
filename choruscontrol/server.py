@@ -111,6 +111,7 @@ def create_app() -> FastAPI:
     tabs = ["overview", "trace", "taxonomy", "memory", "guard", "admin"]
 
     def _page(request: Request, tab_name: str):
+        cc = request.app.state.cc
         return templates.TemplateResponse(
             request,
             "shell.html",
@@ -118,8 +119,10 @@ def create_app() -> FastAPI:
                 "title": settings.product_title,
                 "tab": tab_name,
                 "tabs": tabs,
-                "license_state": request.app.state.cc.license_status.state,
+                "license_state": cc.license_status.state,
                 "support_url": settings.insightits_support_url,
+                "demo_mode": settings.demo_mode,
+                "demo_token": settings.admin_token if settings.demo_mode else "",
             },
         )
 

@@ -899,14 +899,15 @@ async def admin_doctor(request: Request, _=require_role("admin")):
 
 @router.get("/admin/auth")
 async def admin_auth(request: Request):
-    """Auth modes available (no secrets)."""
+    """Auth modes available. In demo_mode, include token hint so UI can self-heal."""
     s = state(request).settings
-    return {
+    out = {
         "local_token": True,
         "oidc_enabled": s.oidc_enabled,
         "oidc_issuer": s.oidc_issuer,
         "oidc_audience": s.oidc_audience,
         "oidc_role_claim": s.oidc_role_claim,
+        "demo_mode": s.demo_mode,
         "formats": [
             "Bearer <ADMIN_TOKEN>",
             "Bearer <ADMIN_TOKEN>:<role>",
@@ -914,6 +915,20 @@ async def admin_auth(request: Request):
             "Bearer <OIDC_JWT> when OIDC enabled",
         ],
     }
+    if s.demo_mode:
+        # Local/demo only — never expose outside demo_mode
+        out["demo_token"] = s.admin_token
+        out["demo_token_candidates"] = list(
+            dict.fromkeys(
+                [
+                    s.admin_token,
+                    "healthcare-demo-token",
+                    "dev-admin-token",
+                ]
+            )
+        )
+    return out
+
 
 
 @router.get("/metrics/series")

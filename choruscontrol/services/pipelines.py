@@ -22,13 +22,18 @@ async def live_pipelines(state) -> dict[str, Any]:
             "online": bool(n.get("online")),
             "zone": n.get("network_zone"),
             "products": list((n.get("products") or {}).keys())[:6],
+            "agent_ledger_dropped_total": (getattr(state, "node_stats", {}) or {})
+            .get(n["node_id"], {})
+            .get("ledger_dropped_total", 0),
         }
         for n in nodes
     ]
 
-    # Execution pipeline from latest trace
-    traces = await list_traces(state.store, "default", limit=5)
+    # Execution pipeline from latest trace (prefer healthcare demo tenant)
     execution = {"run_id": None, "stages": _default_stages(), "active_index": 0}
+    traces = await list_traces(state.store, "aurora-health", limit=5)
+    if not traces:
+        traces = await list_traces(state.store, "default", limit=5)
     if traces:
         run_id = traces[0]["run_id"]
         tr = await get_trace(state.store, run_id)

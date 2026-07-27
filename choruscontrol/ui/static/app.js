@@ -1,12 +1,88 @@
-const token = localStorage.getItem("cc_token") || "dev-admin-token";
-const headers = {
-  Authorization: "Bearer " + token,
+let token = localStorage.getItem("cc_token") || "";
+let headers = {
+  Authorization: "Bearer " + (token || "pending"),
   "Content-Type": "application/json",
 };
+
+function setToken(next) {
+  token = (next || "").trim();
+  if (token) localStorage.setItem("cc_token", token);
+  headers = {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  };
+  const input = document.getElementById("apiToken");
+  if (input && input.value !== token) input.value = token;
+}
+
+async function resolveToken() {
+  const input = document.getElementById("apiToken");
+  const demoFromPage = (input?.dataset.demoToken || "").trim();
+  const stored = (localStorage.getItem("cc_token") || "").trim();
+  const candidates = [];
+  const push = (t) => {
+    if (t && !candidates.includes(t)) candidates.push(t);
+  };
+  push(stored);
+  push(demoFromPage);
+  push("healthcare-demo-token");
+  push("dev-admin-token");
+
+  try {
+    const auth = await fetch("/api/v1/admin/auth").then((r) => r.json());
+    if (auth.demo_token) push(auth.demo_token);
+    for (const c of auth.demo_token_candidates || []) push(c);
+    if (auth.demo_mode) {
+      const banner = document.getElementById("demoBanner");
+      if (banner) banner.hidden = false;
+    }
+  } catch (_) {
+    /* open auth endpoint should always work */
+  }
+
+  for (const cand of candidates) {
+    try {
+      const r = await fetch("/api/v1/admin/license", {
+        headers: { Authorization: "Bearer " + cand },
+      });
+      if (r.ok) {
+        setToken(cand);
+        document.getElementById("authBanner").hidden = true;
+        return true;
+      }
+    } catch (_) {}
+  }
+  if (demoFromPage) setToken(demoFromPage);
+  else if (stored) setToken(stored);
+  document.getElementById("authBanner").hidden = false;
+  return false;
+}
+
 const tab = document.getElementById("main").dataset.tab;
 const view = document.getElementById("view");
 const actions = document.getElementById("actions");
 const out = document.getElementById("out");
+
+// Prefill token box immediately for UX
+(() => {
+  const input = document.getElementById("apiToken");
+  if (!input) return;
+  const initial = localStorage.getItem("cc_token") || input.dataset.demoToken || "";
+  if (initial) input.value = initial;
+  document.getElementById("applyToken")?.addEventListener("click", () => {
+    setToken(input.value);
+    document.getElementById("authBanner").hidden = true;
+    load();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      setToken(input.value);
+      document.getElementById("authBanner").hidden = true;
+      load();
+    }
+  });
+})();
 
 const blurbs = {
   overview: "Live health of the Prism stack — caps, fleet posture, and a transparent AI Score.",
@@ -969,6 +1045,15 @@ async function soft(url, fallback = null) {
 async function load() {
   view.innerHTML = skeleton();
   try {
+    const okAuth = await resolveToken();
+    if (!okAuth && !token) {
+      view.innerHTML = section(
+        "Sign in",
+        `<p class="err">API token required.</p>
+         <p class="score-meta">Healthcare demo token: <code>healthcare-demo-token</code> — paste in the left rail and click Apply.</p>`
+      );
+      return;
+    }
     const lic = await j("/api/v1/admin/license");
     const licEl = document.getElementById("lic");
     const chip = document.getElementById("licChip");
@@ -978,11 +1063,24 @@ async function load() {
 
     let payload = {};
     if (tab === "overview") {
-      const recent = await soft("/api/v1/traces/recent", { traces: [] });
+      let recent = await soft("/api/v1/traces/recent?tenant_id=aurora-health", { traces: [] });
+      if (!(recent.traces || []).length) {
+        recent = await soft("/api/v1/traces/recent?tenant_id=default", { traces: [] });
+      }
       if (!(recent.traces || []).length) {
         try {
-          await j("/api/v1/traces/seed", { method: "POST", body: JSON.stringify({ tenant_id: "default" }) });
-        } catch (_) {}
+          await j("/api/v1/traces/seed", {
+            method: "POST",
+            body: JSON.stringify({ tenant_id: "aurora-health" }),
+          });
+        } catch (_) {
+          try {
+            await j("/api/v1/traces/seed", {
+              method: "POST",
+              body: JSON.stringify({ tenant_id: "default" }),
+            });
+          } catch (__) {}
+        }
       }
       const [matrix, caps, fleet, drift, score, tax, driver, dogfood, pipelines] =
         await Promise.all([

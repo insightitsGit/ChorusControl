@@ -13,5 +13,6 @@ COPY choruscontrol ./choruscontrol
 COPY scripts ./scripts
 COPY pyproject.toml README.md ./
 ENV CHORUSCONTROL_DEMO_MODE=1
+ENV PYTHONPATH=/app
 EXPOSE 8443
 CMD ["choruscontrol", "serve", "--host", "0.0.0.0", "--port", "8443"]

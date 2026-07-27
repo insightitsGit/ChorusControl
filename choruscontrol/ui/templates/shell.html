@@ -41,6 +41,12 @@
         {% endfor %}
       </nav>
       <div class="rail-foot">
+        <div class="token-box">
+          <label for="apiToken">API token</label>
+          <input type="password" id="apiToken" autocomplete="off" spellcheck="false"
+                 data-demo-token="{{ demo_token or '' }}" placeholder="Bearer token" />
+          <button type="button" class="btn secondary" id="applyToken">Apply</button>
+        </div>
         <button type="button" class="rail-chat-btn" id="openChat">Ops Assistant</button>
         <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle color theme">
           <span class="tt-orb" aria-hidden="true"></span>
@@ -58,7 +64,8 @@
       {% if license_state == 'grace' %}
       <div class="banner banner-grace" role="status">License in grace — platform is read-only. Renew via the Insight ITS portal.</div>
       {% endif %}
-      <div class="banner banner-demo" id="demoBanner" hidden role="status">Demo mode — NullAdapters active; metrics labeled honestly.</div>
+      <div class="banner banner-demo" id="demoBanner" {% if not demo_mode %}hidden{% endif %} role="status">Demo mode — NullAdapters active; metrics labeled honestly.</div>
+      <div class="banner banner-auth" id="authBanner" hidden role="alert">Auth failed — set API token below and Apply.</div>
 
       <header class="page-head">
         <div class="page-head-copy reveal">
@@ -110,6 +117,6 @@
   <button type="button" class="fab-chat" id="fabChat" aria-label="Open Ops Assistant">Chat</button>
   <button type="button" class="nav-toggle" id="navToggle" aria-label="Open navigation">Menu</button>
   <script src="/static/viz.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>
