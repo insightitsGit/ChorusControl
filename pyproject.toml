@@ -10,6 +10,16 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [{ name = "Insight IT Solutions LLC" }]
+keywords = ["ai-ops", "chorus", "prism", "fleet", "governance"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Framework :: FastAPI",
+  "Topic :: System :: Systems Administration",
+]
 dependencies = [
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
@@ -17,6 +27,12 @@ dependencies = [
   "httpx>=0.27",
   "PyJWT>=2.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/insightitsGit/ChorusControl"
+Repository = "https://github.com/insightitsGit/ChorusControl"
+Documentation = "https://github.com/insightitsGit/ChorusControl/tree/main/doc"
+Issues = "https://github.com/insightitsGit/ChorusControl/issues"
 
 [project.optional-dependencies]
 server = [

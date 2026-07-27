@@ -45,9 +45,11 @@ ENV CHORUSCONTROL_MOTHER_URL=http://mother:8443
 CMD ["choruscontrol-agent"]
 ```
 
-Until the package is on public PyPI, build from source:
+Until the package is on public PyPI, install from GitHub:
 
 ```bash
+pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
+# or from a clone:
 pip install ".[agent]"
 ```
 

@@ -5,20 +5,44 @@
 
 ## Install
 
+**From GitHub (current — until public PyPI tag):**
+
 ```bash
+pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
+```
+
+Editable / from a clone:
+
+```bash
+git clone https://github.com/insightitsGit/ChorusControl.git
+cd ChorusControl
 pip install -e ".[server,agent,dev]"
 ```
 
-## Run mother
+**After a `v*` tag publish to PyPI:**
+
+```bash
+pip install "choruscontrol[server,agent]==0.1.0"
+```
+
+Prism live packs (private/extra index as needed):
+
+```bash
+pip install "choruscontrol[server,agent,prism]"
+```
+
+## Run mother (local demo)
 
 ```bash
 set CHORUSCONTROL_DEMO_MODE=1
-set CHORUSCONTROL_ADMIN_TOKEN=dev-admin-token
+set CHORUSCONTROL_ADMIN_TOKEN=healthcare-demo-token
 choruscontrol serve --host 127.0.0.1 --port 8443
 ```
 
 Open http://127.0.0.1:8443/overview  
-API auth: `Authorization: Bearer dev-admin-token`
+API auth: `Authorization: Bearer healthcare-demo-token`
+
+Production Azure env: see [doc/Azure-Mother-Env.md](doc/Azure-Mother-Env.md) (`DEMO_MODE=0`, strong admin token, Side 1 JWT + public key hex).
 
 ```bash
 choruscontrol doctor --mode mother
