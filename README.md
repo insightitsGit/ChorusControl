@@ -1,17 +1,80 @@
 # ChorusControl
 
-**ChorusControl — AI Operations Platform** for the Prism / Chorus stack  
-(Enterprise AI Operating System architecture — mother + fleet agents)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-informational)](https://github.com/insightitsGit/ChorusControl)
+[![CI](https://img.shields.io/badge/tests-51%20passing-brightgreen)](https://github.com/insightitsGit/ChorusControl)
 
-## Install
-
-**From GitHub (current — until public PyPI tag):**
+**AI Operations Platform for the Prism / Chorus stack — mother control plane + lightweight fleet agents.**  
+Govern, observe, and correct production AI fleets without putting Side 1 (billing) or phone-home inside the customer VPC.
 
 ```bash
+# Until the first PyPI tag, install from GitHub:
 pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
+
+set CHORUSCONTROL_DEMO_MODE=1
+set CHORUSCONTROL_ADMIN_TOKEN=healthcare-demo-token
+choruscontrol serve --host 127.0.0.1 --port 8443
 ```
 
-Editable / from a clone:
+Open **http://127.0.0.1:8443/overview** · API auth: `Authorization: Bearer healthcare-demo-token`
+
+> **DEMO ≠ production truth.** With `CHORUSCONTROL_DEMO_MODE=1`, missing Prism packs become **NullAdapters** and metrics/scores are labeled `demo`. Live pins report honest caps — we never fake Guard PASS, Shine PASS, or AI Score as world-true.
+
+---
+
+## What is ChorusControl?
+
+ChorusControl is the **self-hosted ops layer** above ChorusGraph, PrismGuard, PrismShine, PrismCortex, PrismRAG, and related products:
+
+| Layer | Role |
+|-------|------|
+| **Mother** | FastAPI AI Ops UI + control APIs (Overview, Trace, Taxonomy, Cortex, Guard, Admin) |
+| **Fleet agent** | Background-only join / heartbeat / commands — **zero hot-path latency** on invoke/digest/recall |
+| **Correction cascade** | Cortex conflict → cache invalidate → Graph `mark_revalidate` → Shine consistency — one audited action |
+| **License** | Offline Ed25519 verify (Side 1 JWT) + optional ~14-day online revoke check |
+
+It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/chorusgraph/)), not an injection firewall ([PrismGuard](https://pypi.org/project/prismguard/)), and not an answer verifier ([PrismShine](https://pypi.org/project/prismshine/)). It **operates** those products across a fleet.
+
+### When NOT to use ChorusControl
+
+- You only need a single-process agent graph → use ChorusGraph alone.  
+- You only need jailbreak / WAF on ingress → use PrismGuard.  
+- You only need answer grounding → use PrismShine.  
+- You need Stripe / license **issuance** → that’s Side 1 ([www.insightits.com](https://www.insightits.com)), not this repo.  
+- You need active-active multi-region mothers on day one → deferred; see [doc/ChorusControl-Future-Mother-HA.md](doc/ChorusControl-Future-Mother-HA.md).
+
+---
+
+## Why ChorusControl?
+
+| Pain | ChorusControl answer |
+|------|----------------------|
+| Many Prism nodes, no single ops surface | Six-tab mother + Ops Assistant grounded in live telemetry |
+| Fact correction doesn’t flush caches | **Correction cascade** (invalidate + revalidate + audit) |
+| Dashboards that lie about capabilities | **Honest caps** + DEMO labels when NullAdapters are in use |
+| Control plane on the request path | Agent is **background-only**; hot path stays local |
+| Air-gapped customers can’t phone home | Offline license verify; online check is optional |
+| “Who is serving Cortex for tenant X?” | Fleet `memory_endpoint` + `/cortex` console |
+
+---
+
+## Quick start (30 seconds)
+
+### 1) Install
+
+```bash
+# GitHub (current)
+pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
+
+# After v0.1.0 is on PyPI:
+# pip install "choruscontrol[server,agent]==0.1.0"
+
+# Live Prism packs (private index / pins as needed):
+# pip install "choruscontrol[server,agent,prism]"
+```
+
+Editable clone:
 
 ```bash
 git clone https://github.com/insightitsGit/ChorusControl.git
@@ -19,95 +82,170 @@ cd ChorusControl
 pip install -e ".[server,agent,dev]"
 ```
 
-**After a `v*` tag publish to PyPI:**
+### 2) Run mother (demo)
 
 ```bash
-pip install "choruscontrol[server,agent]==0.1.0"
-```
-
-Prism live packs (private/extra index as needed):
-
-```bash
-pip install "choruscontrol[server,agent,prism]"
-```
-
-## Run mother (local demo)
-
-```bash
+# Windows
 set CHORUSCONTROL_DEMO_MODE=1
 set CHORUSCONTROL_ADMIN_TOKEN=healthcare-demo-token
 choruscontrol serve --host 127.0.0.1 --port 8443
+
+# Linux / macOS
+export CHORUSCONTROL_DEMO_MODE=1
+export CHORUSCONTROL_ADMIN_TOKEN=healthcare-demo-token
+choruscontrol serve --host 127.0.0.1 --port 8443
 ```
-
-Open http://127.0.0.1:8443/overview  
-API auth: `Authorization: Bearer healthcare-demo-token`
-
-Production Azure env: see [doc/Azure-Mother-Env.md](doc/Azure-Mother-Env.md) (`DEMO_MODE=0`, strong admin token, Side 1 JWT + public key hex).
 
 ```bash
 choruscontrol doctor --mode mother
 ```
 
-## Demo compose (mother + 2 agents)
-
-```bash
-docker compose up --build
-```
-
-Boots mother, creates a join token, enrolls `demo-green` and `demo-blue`.
-
-## Healthcare full-stack demo (Aurora Health)
+### 3) Healthcare full-stack demo (recommended)
 
 ```bash
 docker compose -f docker-compose.healthcare.yml up --build
 ```
 
-Clinical + pharmacy + edge agents, seeded tenants/policy/cascade/traces.  
+Aurora Health scenario: mother + Postgres audit + clinical / pharmacy / edge agents + seeded traces/cascade.  
 UI: http://127.0.0.1:8443/overview · Bearer `healthcare-demo-token`  
-See [doc/Healthcare-Demo.md](doc/Healthcare-Demo.md).
+Details: [doc/Healthcare-Demo.md](doc/Healthcare-Demo.md).
 
-## Fleet agent (other hosts)
+### 4) Lightweight fleet agent
 
 ```bash
-set CHORUSCONTROL_MOTHER_URL=http://mother:8443
-set CHORUSCONTROL_JOIN_TOKEN=<from Admin / POST /api/v1/fleet/join-tokens>
+pip install "choruscontrol[agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
+
+set CHORUSCONTROL_MOTHER_URL=http://127.0.0.1:8443
+set CHORUSCONTROL_JOIN_TOKEN=<from Admin → join token>
 set CHORUSCONTROL_NODE_ID=worker-1
+set CHORUSCONTROL_NODE_ROLE=GREEN
 choruscontrol-agent
-# or: choruscontrol doctor --mode agent
 ```
 
-Or `from choruscontrol.agent import attach_agent` — **background only; never await on invoke/digest/recall**.
+Or from app code (background only — never await on the hot path):
 
-## Design decisions (from review)
+```python
+from choruscontrol.agent import attach_agent
+
+# Schedules join/heartbeat/commands off the request path
+attach_agent()
+```
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Overview** | Fleet topology, health matrix, transparent AI Score, live pipeline viz |
+| **Trace** | Guard → Ledger → Shine wire; zero-token replay |
+| **Taxonomy** | Partition warm / reindex jobs; PrismRAG when pinned |
+| **Cortex** | PrismCortex activity, chunks, digest / recall / sleep |
+| **Guard studio** | Ingress profiles, shadow compare (feature-gated) |
+| **Admin** | License, doctor, tenants, stack licenses, SOC2 export pack, compliance scan |
+| **Ops Assistant** | Guard → ChorusGraph → Shine wire + grounded answers; gated execute |
+| **Cascade** | Conflict resolve → invalidate → `mark_revalidate` → fleet ACKs |
+| **License** | Offline Ed25519 + 14-day grace; optional Side 1 `/validate` |
+| **Exec / Eng modes** | Overview lenses for business vs engineering |
+
+---
+
+## Architecture
+
+```
+                    Customer VPC (Side 2)
+┌──────────────────────────────────────────────────────────┐
+│  Mother  :8443                                           │
+│  UI tabs · /api/v1 · jobs · cascade · audit · SQLite/PG  │
+└─────────────┬────────────────────────────────────────────┘
+              │ HTTP join / heartbeat / commands (primary)
+              │ Fabric optional
+     ┌────────┼────────┬────────────┐
+     ▼        ▼        ▼            ▼
+  GREEN     BLUE    ORANGE      MEMORY/CORTEX
+  worker    worker   edge         memory_endpoint
+     │        │        │            │
+     └────────┴────────┴────────────┘
+        Prism packs local (Guard / Graph / Shine / RAG / Cortex)
+        Agent = background only — no mother RTT on invoke
+```
+
+License **issuance** stays on Side 1. Mother verifies offline (and may optionally re-check revoke status ~every 14 days).
+
+---
+
+## Install & extras
+
+| Extra | Purpose |
+|-------|---------|
+| *(none)* | Core libs |
+| `[server]` | Mother UI/API (FastAPI, Jinja, SQLite) |
+| `[agent]` | Fleet agent CLI |
+| `[postgres]` | Audit / control-plane dual-write (`asyncpg`) |
+| `[prism]` | Live pins: ChorusGraph, Guard, Shine, RAG, Cortex |
+| `[fabric]` | Optional CHORUS Fabric transport |
+| `[all]` | server + agent + postgres + prism |
+| `[dev]` | pytest, ruff |
+
+Packaging detail: [doc/PACKAGING.md](doc/PACKAGING.md).
+
+---
+
+## Production checklist
+
+1. **`CHORUSCONTROL_DEMO_MODE=0`** — never ship demo NullAdapters unlabeled.  
+2. **Strong `CHORUSCONTROL_ADMIN_TOKEN`** (≥16 chars; `serve` refuses weak defaults).  
+3. **Side 1 JWT** in `CHORUSCONTROL_LICENSE_KEY`.  
+4. **Trust anchor** — `CHORUSCONTROL_LICENSE_PUBLIC_KEY_HEX` from Side 1 ceremony `--public` (packaged PEM is a placeholder until you pin the live key).  
+5. Optional: `DATABASE_URL` for Postgres durability; `CHORUSCONTROL_LICENSE_ONLINE_CHECK=1` for revoke polling.  
+
+Full env list: [doc/Azure-Mother-Env.md](doc/Azure-Mother-Env.md).
+
+---
+
+## CLI
+
+```bash
+choruscontrol serve [--host 0.0.0.0] [--port 8443]
+choruscontrol doctor --mode mother|agent|auto
+choruscontrol audit-verify audit.jsonl --pubkey audit_public_key.pem
+choruscontrol-agent
+choruscontrol-keygen   # local/dev issuance helpers only — production keys are Side 1
+```
+
+---
+
+## Design decisions
 
 | Item | Choice |
 |------|--------|
 | Control transport | **HTTP primary**; Fabric optional |
-| Mother persistence | **SQLite default** (+ WAL); Postgres audit via `DATABASE_URL` |
-| License | Offline verify + **14-day grace** read-only |
-| Auth | Local admin token **+ optional OIDC/SSO** |
-| Observability | **Coexists with OTel** — OTel watches; ChorusControl acts |
-| Live Prism packs | Used when installed at pin floors; otherwise **NullAdapters** labeled DEMO |
+| Mother persistence | **SQLite** default (+ WAL); Postgres via `DATABASE_URL` |
+| License | Offline verify + **14-day grace**; optional online validate |
+| Auth | Admin bearer **+ optional OIDC** |
+| Observability | Coexists with OTel — OTel watches; ChorusControl acts |
+| Live Prism | Pin floors when installed; else NullAdapters labeled DEMO |
 
-## Packaging (pip / containers)
-
-See [doc/PACKAGING.md](doc/PACKAGING.md). Lightweight workers:
-
-```bash
-pip install "choruscontrol[agent]"
-# or from source: pip install ".[agent]"
-choruscontrol-agent
-```
-
-Build wheels: `pwsh scripts/build_release.ps1` (tag `v*` publishes via GitHub Actions).
+---
 
 ## Side 1 (website)
 
-License issuance / Stripe / portal UX is **not** in this repo. See [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com-Handoff.md).
+Billing, Stripe, and license **issuance** are **not** in this repo.  
+Contract: [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com-Handoff.md).
+
+---
 
 ## Docs
 
-See `doc/ChorusControl-COMPLETE-DESIGN.md` and `doc/ChorusControl-Implementation-Plan.md`.
+| Doc | Contents |
+|-----|----------|
+| [doc/ChorusControl-COMPLETE-DESIGN.md](doc/ChorusControl-COMPLETE-DESIGN.md) | Full design authority |
+| [doc/Healthcare-Demo.md](doc/Healthcare-Demo.md) | Aurora Health walkthrough |
+| [doc/ChorusControl-Enterprise-Depth.md](doc/ChorusControl-Enterprise-Depth.md) | Phase 3–6 depth shipped |
+| [doc/ChorusControl-Future-Mother-HA.md](doc/ChorusControl-Future-Mother-HA.md) | Deferred multi-region HA |
+| [doc/PACKAGING.md](doc/PACKAGING.md) | Wheels, extras, containers |
+
+---
 
 ## Tests
 
@@ -115,7 +253,21 @@ See `doc/ChorusControl-COMPLETE-DESIGN.md` and `doc/ChorusControl-Implementation
 pytest -q
 ```
 
-Includes hot-path latency (S03) and restart soak.
+Includes hot-path latency (S03), restart soak, publish-blocker regressions (license trust + fleet auth).
+
+---
+
+## Publish (maintainers)
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+# GitHub Actions: test → build → PyPI (Trusted Publisher)
+```
+
+Manual: `python -m build` then `twine upload dist/*` (prefer TestPyPI first).
+
+---
 
 ## License
 
