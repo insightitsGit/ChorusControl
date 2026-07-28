@@ -6,6 +6,25 @@ import json
 import time
 from typing import Any
 
+from choruscontrol.services.assistant_glossary import (
+    CASCADE_PLAIN,
+    CORTEX_PLAIN,
+    DOCTOR_PLAIN,
+    GUARD_PLAIN,
+    LOGS_PLAIN,
+    PIPELINE_PLAIN,
+    TAXONOMY_PLAIN,
+    TRACE_PLAIN,
+    explain_cascade,
+    explain_cortex,
+    explain_doctor,
+    explain_guard,
+    explain_logs,
+    explain_performance_zero,
+    explain_pipeline_decisions,
+    explain_taxonomy,
+    explain_trace,
+)
 from choruscontrol.services.assistant_knowledge import (
     AGENT_CATALOG,
     PLATFORM_BRIEF,
@@ -104,8 +123,10 @@ def _fmt_dim(key: str, value: float) -> str:
 
 
 async def dashboard_snapshot(state) -> dict[str, Any]:
-    """Live numbers the Overview shows - single source for Assistant grounding."""
+    """Live numbers the Overview (and other tabs) show — single source for Assistant grounding."""
+    from choruscontrol.adapters.pins import taxonomy_packs_ready
     from choruscontrol.services.caps import aggregate_caps, compute_ai_score, policy_drift
+    from choruscontrol.services.doctor import doctor_mother
     from choruscontrol.services.pipelines import live_pipelines
 
     caps = await aggregate_caps(state)
@@ -164,6 +185,171 @@ async def dashboard_snapshot(state) -> dict[str, Any]:
         for n in nodes
     ]
 
+    # Prefer aurora tenant when present for Taxonomy/Cortex teachables
+    tenant_hint = "default"
+    for n in nodes:
+        tid = n.get("tenant_id") or ""
+        if tid in ("aurora-health", "aurora-pharmacy"):
+            tenant_hint = "aurora-health" if tid == "aurora-health" else tid
+            break
+
+    # Taxonomy live fields
+    taxonomy: dict[str, Any] = {
+        "engine": "null",
+        "demo": True,
+        "partitions": [],
+        "category_count": 0,
+        "health": {},
+        "tenant_id": tenant_hint,
+    }
+    try:
+        from choruscontrol.services import taxonomy_rag as taxmod
+
+        tree = taxmod.taxonomy_tree(tenant_hint)
+        parts = taxmod.taxonomy_partitions(tenant_hint)
+        health = taxmod.taxonomy_chunks_health(tenant_hint)
+        eng = tree.get("engine") or parts.get("engine") or state.adapter_sources.get("rag") or "null"
+        taxonomy = {
+            "engine": eng,
+            "demo": bool(tree.get("demo") or parts.get("demo") or eng == "null"),
+            "partitions": parts.get("partitions") or [],
+            "category_count": len(tree.get("categories") or []),
+            "health": {
+                "bleed_risk": health.get("bleed_risk"),
+                "decay": health.get("decay") or [],
+                "demo": health.get("demo"),
+            },
+            "tenant_id": tenant_hint,
+        }
+    except Exception:  # noqa: BLE001
+        taxonomy["engine"] = state.adapter_sources.get("rag") or "null"
+
+    tax_packs = taxonomy_packs_ready()
+
+    # Guard policy + lexicon
+    guard_row = await state.store.fetchone(
+        "SELECT policy_json FROM guard_policies WHERE tenant_id=?", (tenant_hint,)
+    )
+    if not guard_row:
+        guard_row = await state.store.fetchone(
+            "SELECT policy_json FROM guard_policies WHERE tenant_id=?", ("default",)
+        )
+    pol: dict[str, Any] = {}
+    if guard_row:
+        try:
+            pol = json.loads(guard_row["policy_json"] or "{}")
+        except Exception:  # noqa: BLE001
+            pol = {}
+    lexicon_count = 0
+    try:
+        lex = await state.guard.get_lexicon(tenant_hint)
+        lexicon_count = len(lex or [])
+    except Exception:  # noqa: BLE001
+        lexicon_count = 0
+    guard_caps = caps.get("guard") or {}
+    guard = {
+        "ingress_profile": pol.get("ingress_profile"),
+        "shadow_profile": pol.get("shadow_profile"),
+        "shadow_enabled": pol.get("shadow_enabled"),
+        "enforce_shadow": pol.get("enforce_shadow"),
+        "recommended_preset": pol.get("recommended_preset"),
+        "lexicon_count": lexicon_count,
+        "caps_demo": bool(guard_caps.get("demo")),
+        "caps": guard_caps,
+    }
+
+    # Cortex snapshot
+    cortex: dict[str, Any] = {
+        "engine": state.adapter_sources.get("cortex") or "null",
+        "chunk_count": 0,
+        "fact_count": 0,
+        "conflict_count": 0,
+        "activity_count": 0,
+        "last_digest": None,
+        "last_sleep_consolidated": None,
+    }
+    try:
+        from choruscontrol.services.cortex_ops import snapshot as cortex_snapshot
+
+        cx = cortex_snapshot(tenant_hint)
+        cortex = {
+            "engine": cx.get("engine") or state.adapter_sources.get("cortex") or "null",
+            "chunk_count": len(cx.get("chunks") or []),
+            "fact_count": len(cx.get("facts") or []),
+            "conflict_count": len(cx.get("conflicts") or []),
+            "activity_count": len(cx.get("activity") or []),
+            "last_digest": next(
+                (a.get("kind") for a in (cx.get("activity") or []) if "digest" in str(a.get("kind"))),
+                None,
+            ),
+            "last_sleep_consolidated": next(
+                (
+                    a.get("consolidated") or a.get("count")
+                    for a in (cx.get("activity") or [])
+                    if "sleep" in str(a.get("kind"))
+                ),
+                None,
+            ),
+            "demo": bool(cx.get("demo")),
+        }
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Doctor / pins
+    try:
+        doctor = await doctor_mother(state)
+    except Exception:  # noqa: BLE001
+        doctor = {
+            "license": {"state": lic},
+            "pins": getattr(state, "adapter_pins", {}) or {},
+            "taxonomy_packs": tax_packs,
+            "install_hint": tax_packs.get("install_hint"),
+            "fleet_nodes": len(nodes),
+            "adapters": {
+                k: {"source": v, "demo": v == "null"} for k, v in state.adapter_sources.items()
+            },
+        }
+
+    # Trace / ledger counts
+    traces = await state.store.fetchall(
+        "SELECT run_id, created_at FROM traces ORDER BY created_at DESC LIMIT 10"
+    )
+    stage_detail = []
+    for s in (pipe.get("execution") or {}).get("stages") or []:
+        stage_detail.append(
+            {
+                "label": s.get("label") or s.get("id"),
+                "decision": s.get("decision"),
+                "status": s.get("status"),
+                "gate": s.get("gate"),
+            }
+        )
+
+    # Ops logs summary
+    logs_summary: dict[str, Any] = {"count": 0, "sources": [], "levels": []}
+    if getattr(state, "ops_logs", None) is not None:
+        try:
+            entries = await state.ops_logs.search(limit=50)
+            logs_summary = {
+                "count": len(entries),
+                "sources": sorted({e.get("source") for e in entries if e.get("source")}),
+                "levels": sorted({e.get("level") for e in entries if e.get("level")}),
+            }
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Driver latency (honest —)
+    driver: dict[str, Any] = {"p50_ms": None}
+    try:
+        fn = getattr(state.graph, "driver_latency", None)
+        if fn:
+            driver = await fn()
+    except Exception:  # noqa: BLE001
+        pass
+
+    cascade_id = (pipe.get("cascade") or {}).get("cascade_id")
+    cascade_state = (pipe.get("cascade") or {}).get("state")
+
     return {
         "score": score,
         "metrics": {
@@ -172,6 +358,14 @@ async def dashboard_snapshot(state) -> dict[str, Any]:
             "tokens_saved": metrics.get("tokens_saved"),
             "demo": bool(metrics.get("demo")),
         },
+        "token_tax": {
+            "hit_rate": metrics.get("hit_rate"),
+            "tokens_saved": metrics.get("tokens_saved"),
+            "cost_saved_usd": metrics.get("cost_saved_usd"),
+            "demo": bool(metrics.get("demo")),
+            "driver_p50_ms": driver.get("p50_ms"),
+        },
+        "driver": driver,
         "incidents": {
             "open_count": len(incidents),
             "latest": [
@@ -195,19 +389,43 @@ async def dashboard_snapshot(state) -> dict[str, Any]:
             "stages": [
                 s.get("label") for s in ((pipe.get("execution") or {}).get("stages") or [])
             ],
-            "cascade_state": (pipe.get("cascade") or {}).get("state"),
+            "stage_detail": stage_detail,
+            "cascade_state": cascade_state,
+            "cascade_id": cascade_id,
         },
+        "taxonomy": taxonomy,
+        "taxonomy_packs": tax_packs,
+        "guard": guard,
+        "cortex": cortex,
+        "doctor": doctor,
+        "trace": {
+            "recent_count": len(traces or []),
+            "latest_run_id": (traces[0]["run_id"] if traces else None),
+        },
+        "logs": logs_summary,
         "license": {
             "state": lic,
             "tier": state.license_status.claims.tier if state.license_status.claims else None,
         },
         "demo_mode": state.settings.demo_mode,
+        "adapter_sources": dict(state.adapter_sources),
         "lowest_dimensions": [{"key": k, "value": v} for k, v in lowest],
         "highest_dimensions": [{"key": k, "value": v} for k, v in highest],
         "glossary": DIMENSION_PLAIN,
         "layers": LAYER_PLAIN,
         "roles": ROLE_PLAIN,
+        "glossaries": {
+            "taxonomy": TAXONOMY_PLAIN,
+            "trace": TRACE_PLAIN,
+            "guard": GUARD_PLAIN,
+            "cortex": CORTEX_PLAIN,
+            "doctor": DOCTOR_PLAIN,
+            "logs": LOGS_PLAIN,
+            "cascade": CASCADE_PLAIN,
+            "pipeline": PIPELINE_PLAIN,
+        },
         "platform_brief": PLATFORM_BRIEF.strip(),
+        "tenant_hint": tenant_hint,
     }
 
 
@@ -313,8 +531,8 @@ def explain_overview(snap: dict[str, Any]) -> str:
             or "none enrolled yet"
         )
         + ".\n\n"
-        "Ask about a number ('why is reliability 0?') or an agent "
-        "('what does the clinical agent do?', 'explain GREEN vs ORANGE')."
+        "Ask about a number ('why is reliability 0?', 'why is performance 0?') or any tab value "
+        "('what is partition version?', 'what do pin floors mean?', 'what is zero-token replay?')."
     )
 
 
@@ -469,7 +687,13 @@ async def assistant_ask(
             )
         ) or q in ("help", "?", "hi", "hello"):
             return explain_overview(snap)
-        if "layer" in q or "l0" in q or "l1" in q or "matrix" in q or "health matrix" in q:
+        if (
+            "layer" in q
+            or "health matrix" in q
+            or "matrix" in q
+            or any(f"l{i}" in q for i in range(6))
+            or "prism pack" in q
+        ):
             return explain_matrix(snap)
         if dim_hit and any(
             w in q
@@ -490,7 +714,14 @@ async def assistant_ask(
             return explain_score(snap, focus=focus)
         if "reliability" in q:
             return explain_score(snap, focus="reliability")
-        if "performance" in q or "hit rate" in q or "cache" in q:
+        if "performance" in q or "hit rate" in q or (("cache" in q) and "invalidate" not in q):
+            perf = float((snap["score"]["dimensions"] or {}).get("performance") or 0)
+            hit = snap["metrics"].get("hit_rate")
+            if (
+                "why" in q
+                and (perf <= 0 or hit in (0, 0.0, None) or "0" in q)
+            ) or ("performance 0" in q or "performance is 0" in q):
+                return explain_performance_zero(snap)
             return (
                 explain_score(snap, focus="performance")
                 + f"\n\nLive hit_rate={snap['metrics'].get('hit_rate')}, "
@@ -510,7 +741,173 @@ async def assistant_ask(
                 f"Reliability on the Overview is **{snap['score']['dimensions'].get('reliability')}** "
                 f"because each open incident subtracts 5 from 100. Latest: {titles}."
             )
-        if "stale" in q or "knowledge" in q or "taxonomy" in q or "partition" in q:
+        # --- Tab glossaries (HO-009) ---
+        if any(
+            p in q
+            for p in (
+                "taxonomy_packs",
+                "taxonomy packs",
+                "packs ready",
+                "prismrag-patch",
+                "prismrag",
+                "partition version",
+                "what is a partition",
+                "chunk staleness",
+                "staleness",
+                "bleed risk",
+                "taxonomy engine",
+                "what does taxonomy",
+                "overwrite chunk",
+                "embedding dim",
+            )
+        ) or (
+            "taxonomy" in q
+            and any(w in q for w in ("what", "explain", "mean", "engine", "version", "why"))
+        ):
+            focus = None
+            if "pack" in q:
+                focus = "taxonomy_packs"
+            elif "version" in q or "partition" in q:
+                focus = "partition_version"
+            elif "stale" in q:
+                focus = "staleness"
+            elif "bleed" in q:
+                focus = "bleed_risk"
+            elif "overwrite" in q or "embed" in q:
+                focus = "overwrite"
+            elif "engine" in q or "prismrag" in q:
+                focus = "engine"
+            return explain_taxonomy(snap, focus=focus)
+        if any(
+            p in q
+            for p in (
+                "zero-token",
+                "zero token",
+                "replay",
+                "what is a run",
+                "run_id",
+                "ledger",
+                "wire stage",
+            )
+        ) or (
+            ("trace" in q or "wire" in q)
+            and any(w in q for w in ("what", "explain", "mean", "replay"))
+        ):
+            focus = "replay" if "replay" in q or "zero" in q else ("ledger" if "ledger" in q else "wire_stages")
+            if "run" in q:
+                focus = "run_id"
+            return explain_trace(snap, focus=focus)
+        if any(
+            p in q
+            for p in (
+                "shadow compare",
+                "shadow_profile",
+                "ingress_profile",
+                "enforce_shadow",
+                "lexicon",
+                "guard profile",
+                "what is guard",
+            )
+        ) or (
+            "guard" in q and any(w in q for w in ("what", "explain", "mean", "shadow", "ingress"))
+        ):
+            focus = "shadow_compare"
+            if "ingress" in q:
+                focus = "ingress_profile"
+            elif "lexicon" in q:
+                focus = "lexicon"
+            elif "shadow" in q and "compare" not in q:
+                focus = "shadow_profile"
+            elif "caps" in q or "demo" in q:
+                focus = "caps_demo"
+            return explain_guard(snap, focus=focus)
+        if any(
+            p in q
+            for p in (
+                "cortex digest",
+                "digest committed",
+                "what does cortex",
+                "memory chunk",
+                "sleep consolidated",
+                "prismcortex",
+                "recall answer",
+            )
+        ) or (
+            "cortex" in q and any(w in q for w in ("what", "explain", "mean", "digest", "sleep", "recall"))
+        ):
+            focus = "engine"
+            if "digest" in q:
+                focus = "digest"
+            elif "sleep" in q:
+                focus = "sleep"
+            elif "recall" in q:
+                focus = "recall"
+            elif "activity" in q:
+                focus = "activity"
+            return explain_cortex(snap, focus=focus)
+        if any(
+            p in q
+            for p in (
+                "pin floor",
+                "pin floors",
+                "core vs optional",
+                "optional pin",
+                "missing core",
+                "install_hint",
+                "install hint",
+                "soc2",
+                "join token",
+                "compliance finding",
+                "adapter source",
+                "what do pin",
+            )
+        ) or (
+            ("doctor" in q or "admin" in q or "pin" in q)
+            and any(w in q for w in ("what", "explain", "mean", "why", "missing"))
+        ):
+            focus = "pin_floors"
+            if "optional" in q or "core" in q:
+                focus = "core_vs_optional"
+            elif "taxonomy_packs" in q or "packs" in q:
+                focus = "taxonomy_packs"
+            elif "license" in q:
+                focus = "license"
+            elif "soc2" in q:
+                focus = "soc2_export"
+            elif "join" in q:
+                focus = "join_token"
+            elif "compliance" in q or "finding" in q:
+                focus = "compliance"
+            elif "adapter" in q:
+                focus = "adapters"
+            elif "install" in q:
+                focus = "install_hint"
+            return explain_doctor(snap, focus=focus)
+        if any(
+            p in q
+            for p in (
+                "ops log",
+                "ops logs",
+                "log source",
+                "logs tab",
+                "node filter",
+                "what does logs",
+            )
+        ) or ("log" in q and any(w in q for w in ("what", "explain", "mean", "filter", "level", "source"))):
+            focus = "source_filter" if "source" in q or "filter" in q or "node" in q else "ops_logs"
+            if "level" in q:
+                focus = "level"
+            return explain_logs(snap, focus=focus)
+        if "cascade" in q and any(w in q for w in ("what", "mean", "explain", "completed", "idle", "failed", "why")):
+            return explain_cascade(snap)
+        if any(
+            p in q
+            for p in ("pipeline decision", "guard allow", "shine pass", "shine verdict", "wire decision")
+        ):
+            return explain_pipeline_decisions(snap)
+        if "stale" in q or (
+            "knowledge" in q and any(w in q for w in ("why", "score", "dimension", "low"))
+        ):
             actions.append(
                 {
                     "type": "job",
@@ -524,7 +921,8 @@ async def assistant_ask(
             )
             return (
                 explain_score(snap, focus="knowledge")
-                + "\n\nCheck Taxonomy partitions and warm_partition if versions lag."
+                + "\n\n"
+                + explain_taxonomy(snap, focus="staleness")
             )
         if "policy" in q or "drift" in q:
             return (
@@ -532,7 +930,9 @@ async def assistant_ask(
                 f"Drift means a worker's Guard profile hint disagrees with Policy Studio intent "
                 f"(e.g. hub clinical_chat vs heavy/law). Fix in Guard tab, then re-check Overview."
             )
-        if "architecture" in q or "graph" in q or "blast" in q:
+        if "architecture" in q or "blast" in q or (
+            "asset graph" in q
+        ):
             return (
                 f"Asset graph has **{len(graph['assets'])}** assets and **{len(graph['edges'])}** edges; "
                 f"**{snap['fleet']['total']}** agents. Use Overview -> Asset graph map for blast radius.\n\n"
@@ -544,7 +944,8 @@ async def assistant_ask(
                 f"Live execution pipeline: **{labels}**. "
                 f"Run `{snap['pipeline'].get('run_id') or 'none yet'}`. "
                 f"Cascade state: {snap['pipeline'].get('cascade_state') or 'idle'}. "
-                f"Fleet online: {snap['fleet']['online']}/{snap['fleet']['total']}."
+                f"Fleet online: {snap['fleet']['online']}/{snap['fleet']['total']}.\n\n"
+                + explain_pipeline_decisions(snap)
             )
         if "fleet" in q or "agent" in q or "node" in q or "worker" in q:
             return explain_fleet(
@@ -573,9 +974,8 @@ async def assistant_ask(
                 }
             )
             return (
-                f"Correction cascade invalidates tags across the fleet. "
-                f"Current cascade state on Overview: **{snap['pipeline'].get('cascade_state') or 'idle'}**. "
-                f"Confirm to run a new cascade."
+                explain_cascade(snap)
+                + "\n\nConfirm to run a new cascade (gated)."
             )
         if "demo" in q or "nulladapter" in q or "null adapter" in q:
             return (
@@ -591,7 +991,8 @@ async def assistant_ask(
             f"Cost {snap['score']['dimensions'].get('cost_efficiency')}; "
             f"{snap['fleet']['online']}/{snap['fleet']['total']} agents online; "
             f"{snap['incidents']['open_count']} incidents). "
-            f"Ask 'explain the dashboard', 'what does the clinical agent do?', or 'who are the agents?'.\n\n"
+            f"Ask about **any number on the dashboard** — scores, Taxonomy engine, pin floors, "
+            f"cascade state, Guard shadow, Cortex digest, Logs filters, or Trace replay.\n\n"
             f"{explain_overview(snap)}"
         )
 

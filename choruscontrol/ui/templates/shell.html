@@ -89,18 +89,12 @@
       <div class="chat-head">
         <div>
           <strong>Ops Assistant</strong>
-          <p>Guard → ChorusGraph → Shine · live Overview grounding</p>
+          <p>Plain-English teach mode · live dashboard grounding</p>
         </div>
         <button type="button" class="chat-close" id="closeChat" aria-label="Close assistant">×</button>
       </div>
-      <div class="chat-suggest" id="chatSuggest">
-        <button type="button" data-q="Explain the dashboard numbers in plain English">Explain scores</button>
-        <button type="button" data-q="Why is reliability low?">Reliability</button>
-        <button type="button" data-q="What is the AI Score?">AI Score</button>
-        <button type="button" data-q="Explain L0 through L5 health">Layers</button>
-        <button type="button" data-q="Who are the agents and what do they do?">Agents</button>
-        <button type="button" data-q="What does the clinical agent do?">Clinical</button>
-        <button type="button" data-q="Explain GREEN vs ORANGE">Roles</button>
+      <div class="chat-suggest" id="chatSuggest" data-tab-suggests="1">
+        <!-- Filled by app.js from TAB_SUGGESTS for the active tab -->
       </div>
       <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
       <form class="chat-form" id="chatForm">
@@ -119,7 +113,7 @@
 
   <button type="button" class="fab-chat" id="fabChat" aria-label="Open Ops Assistant">Chat</button>
   <button type="button" class="nav-toggle" id="navToggle" aria-label="Open navigation">Menu</button>
-  <script src="/static/viz.js?v=5"></script>
-  <script src="/static/app.js?v=5"></script>
+  <script src="/static/viz.js?v=6"></script>
+  <script src="/static/app.js?v=6"></script>
 </body>
 </html>

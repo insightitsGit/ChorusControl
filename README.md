@@ -210,7 +210,7 @@ attach_agent()
 | **Guard studio** | Ingress profiles, shadow compare (feature-gated) |
 | **Logs** | Searchable ops log bus (audit, fleet, ledger, cascade, agent push) + realtime `WS /api/v1/logs/live` |
 | **Admin** | License, doctor, tenants, stack licenses, SOC2 export pack, compliance scan |
-| **Ops Assistant** | Guard → ChorusGraph → Shine wire + grounded answers; gated execute |
+| **Ops Assistant** | Guard → ChorusGraph → Shine wire + grounded answers; gated execute; **plain-English teach mode** for every tab ([doc/Ops-Assistant.md](doc/Ops-Assistant.md)) |
 | **Cascade** | Conflict resolve → invalidate → `mark_revalidate` → fleet ACKs |
 | **Multi-agent fleet** | One mother · many agents (`max_nodes`); filter Logs / Trace by `node_id` |
 | **License** | Offline Ed25519 + 14-day grace; optional Side 1 `/validate` |

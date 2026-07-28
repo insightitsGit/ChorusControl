@@ -119,6 +119,67 @@ document.getElementById("eyebrow").textContent = eyebrows[tab] || "Operations pl
 document.getElementById("heading").textContent =
   tab === "overview" ? "Overview" : tab.charAt(0).toUpperCase() + tab.slice(1);
 
+/** Learn-this-screen prompts for Ops Assistant (HO-009). */
+const TAB_SUGGESTS = {
+  overview: [
+    ["Explain scores", "Explain the dashboard numbers in plain English"],
+    ["Performance 0?", "Why is Performance 0?"],
+    ["Layers", "Explain L0 through L5 health"],
+    ["Cascade", "What does cascade completed mean?"],
+    ["Agents", "Who are the agents and what do they do?"],
+    ["GREEN vs ORANGE", "Explain GREEN vs ORANGE"],
+  ],
+  trace: [
+    ["Zero-token replay", "What is zero-token replay?"],
+    ["What is a run?", "What is a run_id on Trace?"],
+    ["Wire stages", "What do Guard Graph Shine wire stages mean?"],
+    ["Ledger", "What is the Route Ledger?"],
+  ],
+  taxonomy: [
+    ["PrismRAG engine", "What does Taxonomy engine prismrag-patch mean?"],
+    ["Partition version", "What is a partition version?"],
+    ["Staleness", "What does chunk staleness mean?"],
+    ["taxonomy_packs", "What is taxonomy_packs.ready?"],
+  ],
+  cortex: [
+    ["Digest", "What does Cortex digest committed mean?"],
+    ["Recall", "What does Cortex recall mean?"],
+    ["Sleep", "What does Cortex sleep consolidated mean?"],
+    ["Engine", "What does PrismCortex engine mean?"],
+  ],
+  guard: [
+    ["Shadow compare", "What is Guard shadow compare?"],
+    ["Ingress profile", "What does Guard ingress_profile mean?"],
+    ["Lexicon", "What is the Guard lexicon for?"],
+    ["Shadow vs enforce", "What does shadow_enabled vs enforce_shadow mean?"],
+  ],
+  logs: [
+    ["Ops logs", "What are Ops Logs?"],
+    ["Sources", "What do log source filters mean?"],
+    ["Node filter", "How do I filter logs by node_id?"],
+    ["Levels", "What do log levels mean?"],
+  ],
+  admin: [
+    ["Pin floors", "What do pin floors mean? Core vs optional?"],
+    ["taxonomy_packs", "What is taxonomy_packs.ready?"],
+    ["License", "What does license valid vs grace mean?"],
+    ["SOC2 export", "What is the SOC2 export zip?"],
+  ],
+};
+
+function renderSuggestChips() {
+  const box = document.getElementById("chatSuggest");
+  if (!box) return;
+  const items = TAB_SUGGESTS[tab] || TAB_SUGGESTS.overview;
+  box.innerHTML = items
+    .map(
+      ([label, q]) =>
+        `<button type="button" data-q="${escapeHtml(q)}">${escapeHtml(label)}</button>`
+    )
+    .join("");
+}
+renderSuggestChips();
+
 document.getElementById("navToggle")?.addEventListener("click", () => {
   document.body.classList.toggle("nav-open");
 });
@@ -260,6 +321,14 @@ async function askAssistant(question, { confirm = false, execute = null } = {}) 
     };
   });
   return r;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function formatAssistantText(text) {
@@ -2406,7 +2475,7 @@ async function load() {
       setChatOpen(true);
       appendChat(
         "bot",
-        "Welcome — Ops Assistant runs Guard → ChorusGraph → Shine on your question, then answers from live Overview telemetry (no world-truth). Pick Light or Dark in the rail. Try “Explain scores” or “What does the clinical agent do?”."
+        "Welcome — Ops Assistant explains **any number on the dashboard** in plain English from live telemetry (scores, Taxonomy engine, pin floors, cascade, Guard, Cortex, Logs, Trace). Guard → ChorusGraph → Shine runs on your question; answers are grounded, not world-truth. Try a learn-this-screen chip for this tab."
       );
     }
   } catch (e) {
