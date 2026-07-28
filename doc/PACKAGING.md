@@ -28,7 +28,43 @@ python scripts/inspect_wheel.py
 
 PowerShell: `pwsh scripts/build_release.ps1`
 
-## Publish checklist (v0.1.3)
+## Publish checklist (v0.1.4)
+
+### What’s new vs 0.1.3 (mother)
+
+- HO-010: safe Assistant `data-exec` encoding (apostrophes)
+- Grace allows non-mutating Assistant executes (`chats.list`, `logs.search`, …)
+- Taxonomy chunk health key (`category_slug`) — no `undefined`
+- Compliance: optional fabric null not medium-flagged as core NullAdapter
+- AG-001 documented: Memory UI → Cortex
+
+### Preflight
+
+- [x] Version `0.1.4` in `pyproject.toml` + `choruscontrol.__version__`
+- [x] Wheel includes UI static/templates + license trust anchors
+- [x] `python -m build` → `choruscontrol-0.1.4-*.whl`
+- [x] `twine check` passes
+- [ ] Upload + tag `v0.1.4`
+
+### Release command
+
+```bash
+Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+python -m build && twine check dist/*
+twine upload dist/choruscontrol-0.1.4-py3-none-any.whl dist/choruscontrol-0.1.4.tar.gz
+
+git tag v0.1.4
+git push origin v0.1.4
+```
+
+Verify:
+
+```bash
+pip install "choruscontrol[server,postgres,prism]==0.1.4"
+choruscontrol doctor --mode mother
+```
+
+## Publish checklist (v0.1.3) — shipped
 
 ### What’s new vs 0.1.2 (mother)
 
@@ -47,50 +83,13 @@ No new extras — still one package; features ship in `[server]` (PrismCortex co
 - [x] Pin tiers + install_hint + reference `docker/Dockerfile.mother` (HO-006)
 - [x] Apache-2.0 `LICENSE` + project classifiers
 - [x] Wheel includes UI static/templates + `side1_public.pem` / `.hex`
-- [ ] `python -m build` → `choruscontrol-0.1.3-*.whl`
-- [ ] `twine check` passes
-- [ ] CI on `main` + tag publish (`.github/workflows/publish.yml`)
+- [x] Published to PyPI as 0.1.3
 
-### One-time: Trusted Publisher on PyPI (optional)
-
-Local **twine upload** is the primary release path today. GitHub **Publish** on tags always runs tests + build; PyPI upload via Actions only succeeds when one of these is configured:
-
-1. Sign in at [pypi.org](https://pypi.org) → project `choruscontrol` → **Publishing** → Trusted Publisher:
-   - **Owner:** `insightitsGit`
-   - **Repository:** `ChorusControl`
-   - **Workflow name:** `publish.yml`
-   - **Environment name:** leave empty
-2. **Or** add repo secret `PYPI_API_TOKEN` (`pypi-…`) for token upload from Actions.
-
-Without either, the OIDC publish step is **non-blocking** (`continue-on-error`) so tag CI stays green after you already uploaded with twine.
-
-### Release command
-
-```bash
-# on main, clean tree — build + upload locally (primary)
-# remove old dist first so twine does not pick 0.1.2 artifacts
-Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue   # PowerShell
-# rm -rf dist                                                    # bash
-python -m build && twine upload dist/*
-
-# optional: tag for GitHub verify workflow
-git tag v0.1.3
-git push origin v0.1.3
-```
-
-Verify:
-
-```bash
-pip install "choruscontrol[server,postgres,prism]==0.1.3"
-choruscontrol doctor --mode mother
-# expect version 0.1.3; Admin → Client AI chats; Ops Assistant “What can you do on taxonomy?”
-```
-
-## Container worker (lightweight)
+### Container worker (lightweight)
 
 ```dockerfile
 FROM python:3.12-slim
-RUN pip install --no-cache-dir "choruscontrol[agent]==0.1.3"
+RUN pip install --no-cache-dir "choruscontrol[agent]==0.1.4"
 ENV CHORUSCONTROL_MOTHER_URL=http://mother:8443
 CMD ["choruscontrol-agent"]
 ```

@@ -2,15 +2,15 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.3-informational)](https://github.com/insightitsGit/ChorusControl)
+[![Version](https://img.shields.io/badge/version-0.1.4-informational)](https://github.com/insightitsGit/ChorusControl)
 [![CI](https://img.shields.io/badge/tests-51%20passing-brightgreen)](https://github.com/insightitsGit/ChorusControl)
 
 **AI Operations Platform for the Prism / Chorus stack — mother control plane + lightweight fleet agents.**  
 Govern, observe, and correct production AI fleets without putting Side 1 (billing) or phone-home inside the customer VPC.
 
 ```bash
-# After v0.1.3 is on PyPI:
-pip install "choruscontrol[server,postgres,prism]==0.1.3"
+# After v0.1.4 is on PyPI:
+pip install "choruscontrol[server,postgres,prism]==0.1.4"
 
 # Until then (or for tip-of-main):
 # pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
@@ -65,8 +65,8 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 ### Customer path (after pip)
 
 1. Buy **Enterprise** (CONTROL) → paste `CHORUSCONTROL_LICENSE_KEY`.  
-2. **Production:** `pip install "choruscontrol[server,postgres,prism]==0.1.3"`  
-   **Demo only:** `pip install "choruscontrol[server]==0.1.3"` + `DEMO_MODE=1`  
+2. **Production:** `pip install "choruscontrol[server,postgres,prism]==0.1.4"`  
+   **Demo only:** `pip install "choruscontrol[server]==0.1.4"` + `DEMO_MODE=1`  
 3. `choruscontrol serve` → **mother = dashboard + API** at `/overview` (you host it; we do not).  
 4. Optional: `choruscontrol-agent` on workers with a join token from Admin.
 
@@ -239,7 +239,7 @@ Mother ships a unified **ops log bus** (SQLite-backed) for platform events — n
 
 Captured sources include mother **audit**, **fleet** join/heartbeat/ack, **ledger** batches, **cascade**, and boot **system** lines. Multi-worker ChorusGraph **execution** truth still flows primarily through **Trace** via async `LEDGER_BATCH` (`/api/v1/fleet/ledger-batch`) per §3.19.6b.
 
-> **Install note:** `0.1.3` mother wheel includes Ops Logs, Client AI chats, and Ops Assistant per-tab execute catalog. Prefer `==0.1.3` (or tip-of-main) over `0.1.2`.
+> **Install note:** `0.1.4` includes HO-010 fixes (Assistant Confirm encoding, grace read executes, taxonomy slug, Memory→Cortex docs) on top of Client chats + Ops Assistant catalog from `0.1.3`.
 
 ---
 
