@@ -310,9 +310,9 @@ async function askAssistant(question, { confirm = false, execute = null } = {}) 
     html += `<div style="margin-top:0.5rem">${r.actions
       .map(
         (a, i) =>
-          `<button type="button" class="btn secondary" style="margin:0.2rem 0.2rem 0 0;font-size:0.72rem" data-exec='${escapeHtml(
-            JSON.stringify(a)
-          )}' data-qi="${i}">${escapeHtml(a.label || a.command || a.type || "action")}</button>`
+          `<button type="button" class="btn secondary" style="margin:0.2rem 0.2rem 0 0;font-size:0.72rem" data-exec="${encodeExecAttr(
+            a
+          )}" data-qi="${i}">${escapeHtml(a.label || a.command || a.type || "action")}</button>`
       )
       .join("")}</div>`;
   }
@@ -324,7 +324,7 @@ async function askAssistant(question, { confirm = false, execute = null } = {}) 
   document.querySelectorAll("[data-exec]").forEach((btn) => {
     btn.onclick = () => {
       try {
-        pendingExecute = JSON.parse(btn.getAttribute("data-exec"));
+        pendingExecute = decodeExecAttr(btn.getAttribute("data-exec"));
         document.getElementById("chatConfirm").hidden = false;
         document.getElementById("chatConfirmMsg").textContent =
           "Confirm gated action: " + JSON.stringify(pendingExecute);
@@ -334,12 +334,22 @@ async function askAssistant(question, { confirm = false, execute = null } = {}) 
   return r;
 }
 
+/** Encode execute payload for HTML attributes (safe for apostrophes in labels/params). BUG-016 */
+function encodeExecAttr(obj) {
+  return encodeURIComponent(JSON.stringify(obj));
+}
+
+function decodeExecAttr(raw) {
+  return JSON.parse(decodeURIComponent(String(raw || "")));
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function formatAssistantText(text) {
@@ -1274,8 +1284,10 @@ async function renderTaxonomy(payload) {
     .join("");
   const decay = (payload.health?.decay || [])
     .map((d) => {
-      const stale = Number(d.staleness) || 0;
-      return `<tr><td>${escapeHtml(d.slug)}</td><td>${stale.toFixed(2)}</td><td>${
+      const stale = Number(d.staleness ?? d.age ?? 0) || 0;
+      const key =
+        d.category_slug || d.slug || d.partition || d.chunk_ref || d.id || "chunk";
+      return `<tr><td>${escapeHtml(String(key))}</td><td>${stale.toFixed(2)}</td><td>${
         stale > 0.3 ? status(false, "stale") : status(true, "fresh")
       }</td></tr>`;
     })
@@ -2351,7 +2363,9 @@ async function renderAdmin(payload) {
   view.querySelectorAll(".chat-open").forEach((el) => {
     el.addEventListener("click", async () => {
       const sid = el.getAttribute("data-sid");
-      const detail = await j(`/api/v1/chats/sessions/${encodeURIComponent(sid)}`);
+      const detail = await j(
+        `/api/v1/chats/sessions/${encodeURIComponent(sid)}?include_pruned=1`
+      );
       const box = document.getElementById("chatSessionDetail");
       const body = document.getElementById("chatSessionBody");
       if (box) box.style.display = "block";

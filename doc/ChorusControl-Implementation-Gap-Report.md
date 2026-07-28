@@ -26,7 +26,8 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 | 3.4 | Invalidation bus | ✅ | broadcaster + ACKs; Fabric live still optional stub |
 | 3.5 | Maintenance job queue | ✅ | sleep/reindex/warm + `cascade.run` + `compliance.scan` |
 | 3.6 | Cryptographic audit | ✅ | JSONL + Postgres dual-write + audit export |
-| 3.7 | Control-plane APIs | ✅ | Tabs: Overview/Trace/Taxonomy/Memory/Cortex/Guard/**Logs**/Admin · tenants · stack licenses |
+| 3.7 | Control-plane APIs | ✅ | Tabs: Overview/Trace/Taxonomy/**Cortex**/Guard/**Logs**/Admin · tenants · stack licenses |
+| 3.7.4 | Memory APIs + UI | ✅ | `/api/v1/memory/*` live; UI consolidated into `/cortex` (AG-001; `GET /memory` → 307) |
 | 3.7.4a | Client AI chats | ✅ | SQLite sessions + PrismCortex compact · Admin UI · fleet chat-batch · Assistant `chats.*` |
 | 3.8 | Runtime / packaging | ✅ | multi-stage Dockerfiles; compose `--profile postgres` |
 | 3.9 | Integration adapters | ✅ | Null + live pins; stack license parsers |

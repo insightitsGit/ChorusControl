@@ -100,15 +100,21 @@ async def run_compliance_scan(state) -> dict[str, Any]:
             )
         )
 
-    nulls = [k for k, v in (s.adapter_sources or {}).items() if v == "null"]
+    # Only flag core NullAdapters in non-demo (BUG-013). Optional fabric/mesh/lang null is OK.
+    CORE_ADAPTERS = {"guard", "shine", "cortex", "graph", "rag", "cache"}
+    nulls = [
+        k
+        for k, v in (s.adapter_sources or {}).items()
+        if v == "null" and k in CORE_ADAPTERS
+    ]
     if nulls and not s.settings.demo_mode:
         findings.append(
             await record_finding(
                 s.store,
                 severity="medium",
                 code="auto.adapters.null",
-                title="NullAdapters in non-demo deploy",
-                detail={"adapters": nulls},
+                title="Core NullAdapters in non-demo deploy",
+                detail={"adapters": nulls, "note": "optional fabric/mesh/lang null not flagged"},
             )
         )
 

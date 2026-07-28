@@ -452,8 +452,8 @@ Honesty banners required in UI:
 | Overview | `/overview` | health matrix, **caps**, token-tax, Driver latency, dogfood, **fleet topology summary** |
 | Trace | `/trace` | live wire WS, ledger, **Guard→Ledger→Shine** stitch, zero-token replay |
 | Taxonomy | `/taxonomy` | 64-d search, category tree, chunk health, reindex, **partition/warm ops** |
-| Memory | `/memory` | bitemporal facts, sleep, conflicts, **cascade on resolve**, explain/recall_at proxy |
-| Cortex | `/cortex` | PrismCortex activity, chunks, digest/recall/sleep; R04 `memory_endpoint`; Ops Assistant can gated-execute the same |
+| Memory | `/memory` | **Consolidated into Cortex UI** (AG-001): APIs remain under `/api/v1/memory/*`; rail has `/cortex`; `GET /memory` → **307 `/cortex`** |
+| Cortex | `/cortex` | PrismCortex activity, chunks, digest/recall/sleep + Memory ops console; R04 `memory_endpoint`; Ops Assistant can gated-execute the same |
 | Guard | `/guard` | logs, shadow compare, lexicon, **Policy Studio** |
 | Logs | `/logs` | Unified ops log bus (audit/fleet/ledger/cascade/agent); search + live WS |
 | Admin | `/admin` | License, stack licenses, tenants, doctor, compliance, **Client AI chats** (end-user sessions + PrismCortex compact), audit/export, RBAC |
@@ -554,6 +554,8 @@ Trace event schema (v1):
 Tenant → memory addressing: fleet registry `memory_endpoint` (agent advertises via join/heartbeat). HTTP endpoints are proxied; `local://` / unset use mother-local PrismCortex.
 
 Prefer Cortex HTTP enterprise surfaces (`/conflicts`, `/explain`, `/recall_at`, replay certificate) via adapter — ChorusControl adds RBAC, audit, and cascade, **not** a second graph store.
+
+**AG-001 (deliberate):** The mother **UI** consolidates Memory + Cortex into one **`/cortex`** tab. Design still exposes `/api/v1/memory/*` for API clients; the rail does not list a separate Memory tab. Bookmarks to `/memory` redirect 307 → `/cortex`.
 
 ##### 3.7.4a End-user client AI chat history (Admin)
 

@@ -1302,14 +1302,15 @@ async def assistant_ask(
     if wired.get("blocked"):
         actions = []
     else:
-        # Merge catalog matches (per-tab run prompts) without dropping intent-specific actions
+        # Merge catalog matches (per-tab run prompts); dedupe by type (BUG cascade double-propose)
         matched = match_actions(question, snap)
-        seen = {(a.get("type"), str(a.get("params"))) for a in actions}
+        seen_types = {a.get("type") for a in actions}
         for a in matched:
-            key = (a.get("type"), str(a.get("params")))
-            if key not in seen:
-                actions.append(a)
-                seen.add(key)
+            t = a.get("type")
+            if t in seen_types:
+                continue
+            actions.append(a)
+            seen_types.add(t)
 
     if execute:
         if not confirm:
@@ -1318,373 +1319,387 @@ async def assistant_ask(
             feats = set(state.license_status.claims.features) if state.license_status.claims else set()
             if "assistant.ops" not in feats and not state.settings.demo_mode:
                 execution = {"status": "denied", "reason": "feature assistant.ops required"}
-            elif state.license_status.state == "grace":
-                execution = {"status": "denied", "reason": "license grace: mutations blocked"}
             else:
                 etype = execute.get("type") or execute.get("command")
                 params = execute.get("params") or {}
-                from choruscontrol.services.enterprise_policy import check_allowed
+                mutating = execute.get("mutating")
+                if mutating is None:
+                    from choruscontrol.services.assistant_actions import ACTION_CATALOG
 
-                gate_domain = None
-                if etype in ("taxonomy.reindex", "taxonomy.warm_partition") or execute.get(
-                    "command"
-                ) in ("taxonomy.reindex", "taxonomy.warm_partition"):
-                    gate_domain = "memory.write"
-                elif etype in (
-                    "cascade",
-                    "guard.policy.put",
-                    "cortex.digest",
-                    "cortex.sleep",
-                    "cortex.conflict_resolve",
-                    "chats.compact",
-                    "chats.compact_tenant",
-                    "traces.seed",
-                    "fleet.join_token",
-                    "incident.create",
-                    "compliance.scan",
-                ) or execute.get("type") == "cascade":
-                    gate_domain = "deployment.approval"
-
-                gate = {"allowed": True}
-                if gate_domain:
-                    gate = await check_allowed(
-                        state.store,
-                        domain=gate_domain,
-                        tenant_id=params.get("tenant_id", "default"),
-                        action=str(etype),
-                        context={"role": "operator", "approved": bool(confirm)},
-                    )
-
-                if not gate.get("allowed"):
-                    execution = {"status": "denied", "reason": gate}
-                elif etype in ("taxonomy.reindex", "job") and (
-                    execute.get("command") == "taxonomy.reindex" or etype == "taxonomy.reindex"
-                ):
-                    job = await state.jobs.trigger_reindex(
-                        params.get("tenant_id", "default")
-                    )
-                    execution = {"status": "ok", "job": job.__dict__}
-                elif (
-                    execute.get("command") == "taxonomy.warm_partition"
-                    or etype == "taxonomy.warm_partition"
-                ):
-                    job = await state.jobs.trigger_warm(
-                        params.get("tenant_id", "default"), params.get("partition")
-                    )
-                    execution = {"status": "ok", "job": job.__dict__}
-                elif etype == "taxonomy.search":
-                    from choruscontrol.services.taxonomy_rag import search_term
-
-                    tid = params.get("tenant_id") or "default"
-                    query = params.get("query") or ""
-                    try:
-                        fallback_hits = await state.rag.search(tid, query)
-                        result = search_term(
-                            tid,
-                            query,
-                            top_k=int(params.get("top_k") or 8),
-                            fallback_search=lambda _t, _q: fallback_hits,
-                        )
-                        execution = {"status": "ok", "search": result}
-                    except Exception as exc:  # noqa: BLE001
-                        execution = {"status": "nack", "reason": str(exc)}
-                elif etype == "cascade" or execute.get("type") == "cascade":
-                    result = await state.cascade.run(
-                        params.get("tenant_id", "default"),
-                        params.get("tags") or ["assistant"],
-                        reason=params.get("reason", "assistant"),
-                    )
-                    execution = {"status": "ok", "cascade": result}
-                elif etype == "incident.create":
-                    from choruscontrol.services.incidents import create_incident
-
-                    inc = await create_incident(
-                        state.store,
-                        tenant_id=params.get("tenant_id", "default"),
-                        title=params.get("title") or "Assistant-opened incident",
-                        details=params.get("details") or {"source": "assistant"},
-                    )
-                    execution = {"status": "ok", "incident": inc}
-                elif etype == "guard.policy.put":
-                    from choruscontrol.services.policy import validate_guard_policy
-
-                    pol = params.get("policy") or {}
-                    if "ingress_profile" not in pol:
-                        g = snap.get("guard") or {}
-                        pol = {
-                            "ingress_profile": g.get("ingress_profile") or "web_chat",
-                            "shadow_profile": g.get("shadow_profile") or "light",
-                            "shadow_enabled": bool(g.get("shadow_enabled", True)),
-                            "enforce_shadow": bool(g.get("enforce_shadow")),
-                        }
-                    validate_guard_policy(pol)
-                    await state.store.execute(
-                        "INSERT INTO guard_policies(tenant_id, policy_json, updated_at) VALUES(?,?,?) "
-                        "ON CONFLICT(tenant_id) DO UPDATE SET policy_json=excluded.policy_json, "
-                        "updated_at=excluded.updated_at",
+                    mutating = next(
                         (
-                            params.get("tenant_id", "default"),
-                            json.dumps(pol),
-                            time.time(),
+                            bool(a.get("mutating"))
+                            for a in ACTION_CATALOG
+                            if a.get("type") == etype or a.get("command") == etype
                         ),
+                        True,  # unknown executes treated as mutating (safe default)
                     )
-                    state.intended_policies[params.get("tenant_id", "default")] = pol
-                    execution = {"status": "ok", "policy": pol}
-                elif etype == "guard.shadow_compare":
-                    tid = params.get("tenant_id") or "default"
-                    row = await state.store.fetchone(
-                        "SELECT policy_json FROM guard_policies WHERE tenant_id=?", (tid,)
-                    )
-                    pol = (
-                        json.loads(row["policy_json"])
-                        if row
-                        else state.intended_policies.get("default", {})
-                    )
-                    fn = getattr(state.guard, "shadow_compare", None)
-                    if fn:
-                        out = await fn(
-                            pol.get("ingress_profile", "web_chat"),
-                            pol.get("shadow_profile", "light"),
-                        )
-                    else:
-                        out = {"agree_rate": 0.0, "demo": True}
-                    execution = {"status": "ok", "shadow_compare": out}
-                elif etype == "traces.replay":
-                    from choruscontrol.services.traces import replay_trace
-
-                    run_id = params.get("run_id")
-                    if not run_id:
-                        execution = {"status": "nack", "reason": "run_id required"}
-                    else:
-                        out = await replay_trace(state.store, run_id)
-                        execution = {"status": "ok", "replay": out}
-                elif etype == "traces.seed":
-                    from choruscontrol.services.traces import seed_demo_trace
-
-                    run_id = await seed_demo_trace(
-                        state.store, tenant_id=params.get("tenant_id") or "default"
-                    )
-                    execution = {"status": "ok", "seed": {"run_id": run_id}}
-                elif etype == "compliance.scan":
-                    from choruscontrol.services.compliance import run_compliance_scan
-
-                    out = await run_compliance_scan(state)
-                    execution = {"status": "ok", "compliance": out}
-                elif etype == "logs.search":
-                    if state.ops_logs is None:
-                        execution = {"status": "nack", "reason": "ops logs unavailable"}
-                    else:
-                        entries = await state.ops_logs.search(
-                            q=params.get("q") or None,
-                            source=params.get("source"),
-                            level=params.get("level"),
-                            tenant_id=params.get("tenant_id"),
-                            node_id=params.get("node_id"),
-                            limit=int(params.get("limit") or 50),
-                        )
-                        execution = {
-                            "status": "ok",
-                            "logs": {"entries": entries, "count": len(entries)},
-                        }
-                elif etype == "graph.blast_radius":
-                    from choruscontrol.services.graph import blast_radius
-
-                    aid = params.get("asset_id")
-                    if not aid:
-                        execution = {"status": "nack", "reason": "asset_id required"}
-                    else:
-                        out = await blast_radius(state.store, aid)
-                        execution = {"status": "ok", "blast_radius": out}
-                elif etype == "fleet.join_token":
-                    token = await state.fleet.create_join_token(
-                        max_uses=int(params.get("max_uses") or 10),
-                        ttl_seconds=int(params.get("ttl_seconds") or 3600),
-                    )
-                    execution = {"status": "ok", "join_token": token}
-                elif etype == "admin.doctor":
-                    from choruscontrol.services.doctor import doctor_mother
-
-                    doc = await doctor_mother(state)
-                    execution = {"status": "ok", "doctor": doc}
-                elif etype == "admin.license_online_check":
-                    try:
-                        check = await state.run_license_online_check(force=True)
-                        execution = {"status": "ok", "check": check}
-                    except Exception as exc:  # noqa: BLE001
-                        execution = {
-                            "status": "ok",
-                            "check": {"enabled": False, "reason": str(exc), "demo": True},
-                        }
-                elif etype == "chats.list":
-                    from choruscontrol.services.client_chats import list_sessions
-
-                    sessions = await list_sessions(
-                        state.store,
-                        tenant_id=params.get("tenant_id"),
-                        limit=int(params.get("limit") or 50),
-                        compact_status=params.get("compact_status"),
-                    )
-                    execution = {"status": "ok", "sessions": sessions, "count": len(sessions)}
-                elif etype == "chats.get":
-                    from choruscontrol.services.client_chats import get_session
-
-                    sid = params.get("session_id")
-                    if not sid:
-                        execution = {"status": "nack", "reason": "session_id required"}
-                    else:
-                        detail = await get_session(state.store, sid)
-                        if not detail:
-                            execution = {"status": "nack", "reason": "session not found"}
-                        else:
-                            execution = {"status": "ok", "session": detail}
-                elif etype == "chats.compact":
-                    from choruscontrol.services.client_chats import compact_session
-
-                    sid = params.get("session_id")
-                    if not sid:
-                        execution = {"status": "nack", "reason": "session_id required"}
-                    else:
-                        try:
-                            result = await compact_session(
-                                state.store, sid, prune=bool(params.get("prune", True))
-                            )
-                            execution = {"status": "ok", "compact": result}
-                        except KeyError:
-                            execution = {"status": "nack", "reason": "session not found"}
-                elif etype == "chats.compact_tenant":
-                    from choruscontrol.services.client_chats import compact_tenant
-
-                    result = await compact_tenant(
-                        state.store,
-                        params.get("tenant_id") or "default",
-                        limit=int(params.get("limit") or 20),
-                    )
-                    execution = {"status": "ok", "compact_tenant": result}
-                elif etype == "cortex.digest":
-                    from choruscontrol.services.cortex_ops import digest, prismcortex_available
-
-                    text = (params.get("text") or "").strip()
-                    if not text:
-                        execution = {"status": "nack", "reason": "text required"}
-                    elif not prismcortex_available():
-                        execution = {
-                            "status": "ok",
-                            "digest": {
-                                "ok": False,
-                                "outcome": "skipped",
-                                "reason": "prismcortex not installed",
-                                "demo": True,
-                            },
-                        }
-                    else:
-                        try:
-                            result = digest(
-                                params.get("tenant_id") or "default",
-                                text,
-                                agent_id="ops-assistant",
-                            )
-                            execution = {"status": "ok", "digest": result}
-                        except Exception as exc:  # noqa: BLE001
-                            execution = {"status": "nack", "reason": str(exc)}
-                elif etype == "cortex.recall":
-                    from choruscontrol.services.cortex_ops import prismcortex_available, recall
-
-                    query = (params.get("query") or "").strip()
-                    if not query:
-                        execution = {"status": "nack", "reason": "query required"}
-                    elif not prismcortex_available():
-                        execution = {
-                            "status": "ok",
-                            "recall": {
-                                "ok": False,
-                                "answer": None,
-                                "reason": "prismcortex not installed",
-                                "demo": True,
-                            },
-                        }
-                    else:
-                        try:
-                            result = recall(params.get("tenant_id") or "default", query)
-                            execution = {"status": "ok", "recall": result}
-                        except Exception as exc:  # noqa: BLE001
-                            execution = {"status": "nack", "reason": str(exc)}
-                elif etype == "cortex.explain":
-                    from choruscontrol.services.cortex_ops import explain, prismcortex_available
-
-                    query = (params.get("query") or "").strip()
-                    if not query:
-                        execution = {"status": "nack", "reason": "query required"}
-                    elif not prismcortex_available():
-                        execution = {
-                            "status": "ok",
-                            "explain": {"ok": False, "reason": "prismcortex not installed", "demo": True},
-                        }
-                    else:
-                        try:
-                            result = explain(params.get("tenant_id") or "default", query)
-                            execution = {"status": "ok", "explain": result}
-                        except Exception as exc:  # noqa: BLE001
-                            execution = {"status": "nack", "reason": str(exc)}
-                elif etype == "cortex.sleep":
-                    from choruscontrol.services.cortex_ops import prismcortex_available, sleep_tenant
-
-                    if not prismcortex_available():
-                        execution = {
-                            "status": "ok",
-                            "sleep": {
-                                "ok": False,
-                                "outcome": "skipped",
-                                "reason": "prismcortex not installed",
-                                "demo": True,
-                            },
-                        }
-                    else:
-                        try:
-                            result = sleep_tenant(params.get("tenant_id") or "default")
-                            job = await state.jobs.trigger_sleep(
-                                params.get("tenant_id") or "default"
-                            )
-                            execution = {"status": "ok", "sleep": result, "job_id": job.job_id}
-                        except Exception as exc:  # noqa: BLE001
-                            execution = {"status": "nack", "reason": str(exc)}
-                elif etype == "cortex.conflict_resolve":
-                    from choruscontrol.services.cortex_ops import (
-                        prismcortex_available,
-                        resolve_conflict as cx_resolve,
-                    )
-
-                    subject = params.get("subject") or params.get("conflict_id")
-                    relation = params.get("relation") or "is"
-                    chosen = params.get("chosen_value") or params.get("resolution") or "keep_new"
-                    if not subject:
-                        execution = {"status": "nack", "reason": "subject/conflict_id required"}
-                    elif not prismcortex_available():
-                        execution = {
-                            "status": "ok",
-                            "resolve": {
-                                "ok": False,
-                                "reason": "prismcortex not installed",
-                                "demo": True,
-                            },
-                        }
-                    else:
-                        try:
-                            result = cx_resolve(
-                                params.get("tenant_id") or "default",
-                                str(subject),
-                                str(relation),
-                                str(chosen),
-                            )
-                            cascade = await state.cascade.run(
-                                params.get("tenant_id") or "default",
-                                [f"cortex:conflict:{subject}"],
-                                reason="cortex_conflict_resolve",
-                            )
-                            execution = {"status": "ok", "resolve": result, "cascade": cascade}
-                        except Exception as exc:  # noqa: BLE001
-                            execution = {"status": "nack", "reason": str(exc)}
+                # BUG-017: grace blocks mutations only (reads like chats.list / logs.search OK)
+                if state.license_status.state == "grace" and mutating:
+                    execution = {"status": "denied", "reason": "license grace: mutations blocked"}
                 else:
-                    execution = {"status": "nack", "reason": f"unsupported execute {execute}"}
+                    from choruscontrol.services.enterprise_policy import check_allowed
+
+                    gate_domain = None
+                    if etype in ("taxonomy.reindex", "taxonomy.warm_partition") or execute.get(
+                        "command"
+                    ) in ("taxonomy.reindex", "taxonomy.warm_partition"):
+                        gate_domain = "memory.write"
+                    elif etype in (
+                        "cascade",
+                        "guard.policy.put",
+                        "cortex.digest",
+                        "cortex.sleep",
+                        "cortex.conflict_resolve",
+                        "chats.compact",
+                        "chats.compact_tenant",
+                        "traces.seed",
+                        "fleet.join_token",
+                        "incident.create",
+                        "compliance.scan",
+                    ) or execute.get("type") == "cascade":
+                        gate_domain = "deployment.approval"
+
+                    gate = {"allowed": True}
+                    if gate_domain:
+                        gate = await check_allowed(
+                            state.store,
+                            domain=gate_domain,
+                            tenant_id=params.get("tenant_id", "default"),
+                            action=str(etype),
+                            context={"role": "operator", "approved": bool(confirm)},
+                        )
+
+                    if not gate.get("allowed"):
+                        execution = {"status": "denied", "reason": gate}
+                    elif etype in ("taxonomy.reindex", "job") and (
+                        execute.get("command") == "taxonomy.reindex" or etype == "taxonomy.reindex"
+                    ):
+                        job = await state.jobs.trigger_reindex(
+                            params.get("tenant_id", "default")
+                        )
+                        execution = {"status": "ok", "job": job.__dict__}
+                    elif (
+                        execute.get("command") == "taxonomy.warm_partition"
+                        or etype == "taxonomy.warm_partition"
+                    ):
+                        job = await state.jobs.trigger_warm(
+                            params.get("tenant_id", "default"), params.get("partition")
+                        )
+                        execution = {"status": "ok", "job": job.__dict__}
+                    elif etype == "taxonomy.search":
+                        from choruscontrol.services.taxonomy_rag import search_term
+
+                        tid = params.get("tenant_id") or "default"
+                        query = params.get("query") or ""
+                        try:
+                            fallback_hits = await state.rag.search(tid, query)
+                            result = search_term(
+                                tid,
+                                query,
+                                top_k=int(params.get("top_k") or 8),
+                                fallback_search=lambda _t, _q: fallback_hits,
+                            )
+                            execution = {"status": "ok", "search": result}
+                        except Exception as exc:  # noqa: BLE001
+                            execution = {"status": "nack", "reason": str(exc)}
+                    elif etype == "cascade" or execute.get("type") == "cascade":
+                        result = await state.cascade.run(
+                            params.get("tenant_id", "default"),
+                            params.get("tags") or ["assistant"],
+                            reason=params.get("reason", "assistant"),
+                        )
+                        execution = {"status": "ok", "cascade": result}
+                    elif etype == "incident.create":
+                        from choruscontrol.services.incidents import create_incident
+
+                        inc = await create_incident(
+                            state.store,
+                            tenant_id=params.get("tenant_id", "default"),
+                            title=params.get("title") or "Assistant-opened incident",
+                            details=params.get("details") or {"source": "assistant"},
+                        )
+                        execution = {"status": "ok", "incident": inc}
+                    elif etype == "guard.policy.put":
+                        from choruscontrol.services.policy import validate_guard_policy
+
+                        pol = params.get("policy") or {}
+                        if "ingress_profile" not in pol:
+                            g = snap.get("guard") or {}
+                            pol = {
+                                "ingress_profile": g.get("ingress_profile") or "web_chat",
+                                "shadow_profile": g.get("shadow_profile") or "light",
+                                "shadow_enabled": bool(g.get("shadow_enabled", True)),
+                                "enforce_shadow": bool(g.get("enforce_shadow")),
+                            }
+                        validate_guard_policy(pol)
+                        await state.store.execute(
+                            "INSERT INTO guard_policies(tenant_id, policy_json, updated_at) VALUES(?,?,?) "
+                            "ON CONFLICT(tenant_id) DO UPDATE SET policy_json=excluded.policy_json, "
+                            "updated_at=excluded.updated_at",
+                            (
+                                params.get("tenant_id", "default"),
+                                json.dumps(pol),
+                                time.time(),
+                            ),
+                        )
+                        state.intended_policies[params.get("tenant_id", "default")] = pol
+                        execution = {"status": "ok", "policy": pol}
+                    elif etype == "guard.shadow_compare":
+                        tid = params.get("tenant_id") or "default"
+                        row = await state.store.fetchone(
+                            "SELECT policy_json FROM guard_policies WHERE tenant_id=?", (tid,)
+                        )
+                        pol = (
+                            json.loads(row["policy_json"])
+                            if row
+                            else state.intended_policies.get("default", {})
+                        )
+                        fn = getattr(state.guard, "shadow_compare", None)
+                        if fn:
+                            out = await fn(
+                                pol.get("ingress_profile", "web_chat"),
+                                pol.get("shadow_profile", "light"),
+                            )
+                        else:
+                            out = {"agree_rate": 0.0, "demo": True}
+                        execution = {"status": "ok", "shadow_compare": out}
+                    elif etype == "traces.replay":
+                        from choruscontrol.services.traces import replay_trace
+
+                        run_id = params.get("run_id")
+                        if not run_id:
+                            execution = {"status": "nack", "reason": "run_id required"}
+                        else:
+                            out = await replay_trace(state.store, run_id)
+                            execution = {"status": "ok", "replay": out}
+                    elif etype == "traces.seed":
+                        from choruscontrol.services.traces import seed_demo_trace
+
+                        run_id = await seed_demo_trace(
+                            state.store, tenant_id=params.get("tenant_id") or "default"
+                        )
+                        execution = {"status": "ok", "seed": {"run_id": run_id}}
+                    elif etype == "compliance.scan":
+                        from choruscontrol.services.compliance import run_compliance_scan
+
+                        out = await run_compliance_scan(state)
+                        execution = {"status": "ok", "compliance": out}
+                    elif etype == "logs.search":
+                        if state.ops_logs is None:
+                            execution = {"status": "nack", "reason": "ops logs unavailable"}
+                        else:
+                            entries = await state.ops_logs.search(
+                                q=params.get("q") or None,
+                                source=params.get("source"),
+                                level=params.get("level"),
+                                tenant_id=params.get("tenant_id"),
+                                node_id=params.get("node_id"),
+                                limit=int(params.get("limit") or 50),
+                            )
+                            execution = {
+                                "status": "ok",
+                                "logs": {"entries": entries, "count": len(entries)},
+                            }
+                    elif etype == "graph.blast_radius":
+                        from choruscontrol.services.graph import blast_radius
+
+                        aid = params.get("asset_id")
+                        if not aid:
+                            execution = {"status": "nack", "reason": "asset_id required"}
+                        else:
+                            out = await blast_radius(state.store, aid)
+                            execution = {"status": "ok", "blast_radius": out}
+                    elif etype == "fleet.join_token":
+                        token = await state.fleet.create_join_token(
+                            max_uses=int(params.get("max_uses") or 10),
+                            ttl_seconds=int(params.get("ttl_seconds") or 3600),
+                        )
+                        execution = {"status": "ok", "join_token": token}
+                    elif etype == "admin.doctor":
+                        from choruscontrol.services.doctor import doctor_mother
+
+                        doc = await doctor_mother(state)
+                        execution = {"status": "ok", "doctor": doc}
+                    elif etype == "admin.license_online_check":
+                        try:
+                            check = await state.run_license_online_check(force=True)
+                            execution = {"status": "ok", "check": check}
+                        except Exception as exc:  # noqa: BLE001
+                            execution = {
+                                "status": "ok",
+                                "check": {"enabled": False, "reason": str(exc), "demo": True},
+                            }
+                    elif etype == "chats.list":
+                        from choruscontrol.services.client_chats import list_sessions
+
+                        sessions = await list_sessions(
+                            state.store,
+                            tenant_id=params.get("tenant_id"),
+                            limit=int(params.get("limit") or 50),
+                            compact_status=params.get("compact_status"),
+                        )
+                        execution = {"status": "ok", "sessions": sessions, "count": len(sessions)}
+                    elif etype == "chats.get":
+                        from choruscontrol.services.client_chats import get_session
+
+                        sid = params.get("session_id")
+                        if not sid:
+                            execution = {"status": "nack", "reason": "session_id required"}
+                        else:
+                            detail = await get_session(state.store, sid)
+                            if not detail:
+                                execution = {"status": "nack", "reason": "session not found"}
+                            else:
+                                execution = {"status": "ok", "session": detail}
+                    elif etype == "chats.compact":
+                        from choruscontrol.services.client_chats import compact_session
+
+                        sid = params.get("session_id")
+                        if not sid:
+                            execution = {"status": "nack", "reason": "session_id required"}
+                        else:
+                            try:
+                                result = await compact_session(
+                                    state.store, sid, prune=bool(params.get("prune", True))
+                                )
+                                execution = {"status": "ok", "compact": result}
+                            except KeyError:
+                                execution = {"status": "nack", "reason": "session not found"}
+                    elif etype == "chats.compact_tenant":
+                        from choruscontrol.services.client_chats import compact_tenant
+
+                        result = await compact_tenant(
+                            state.store,
+                            params.get("tenant_id") or "default",
+                            limit=int(params.get("limit") or 20),
+                        )
+                        execution = {"status": "ok", "compact_tenant": result}
+                    elif etype == "cortex.digest":
+                        from choruscontrol.services.cortex_ops import digest, prismcortex_available
+
+                        text = (params.get("text") or "").strip()
+                        if not text:
+                            execution = {"status": "nack", "reason": "text required"}
+                        elif not prismcortex_available():
+                            execution = {
+                                "status": "ok",
+                                "digest": {
+                                    "ok": False,
+                                    "outcome": "skipped",
+                                    "reason": "prismcortex not installed",
+                                    "demo": True,
+                                },
+                            }
+                        else:
+                            try:
+                                result = digest(
+                                    params.get("tenant_id") or "default",
+                                    text,
+                                    agent_id="ops-assistant",
+                                )
+                                execution = {"status": "ok", "digest": result}
+                            except Exception as exc:  # noqa: BLE001
+                                execution = {"status": "nack", "reason": str(exc)}
+                    elif etype == "cortex.recall":
+                        from choruscontrol.services.cortex_ops import prismcortex_available, recall
+
+                        query = (params.get("query") or "").strip()
+                        if not query:
+                            execution = {"status": "nack", "reason": "query required"}
+                        elif not prismcortex_available():
+                            execution = {
+                                "status": "ok",
+                                "recall": {
+                                    "ok": False,
+                                    "answer": None,
+                                    "reason": "prismcortex not installed",
+                                    "demo": True,
+                                },
+                            }
+                        else:
+                            try:
+                                result = recall(params.get("tenant_id") or "default", query)
+                                execution = {"status": "ok", "recall": result}
+                            except Exception as exc:  # noqa: BLE001
+                                execution = {"status": "nack", "reason": str(exc)}
+                    elif etype == "cortex.explain":
+                        from choruscontrol.services.cortex_ops import explain, prismcortex_available
+
+                        query = (params.get("query") or "").strip()
+                        if not query:
+                            execution = {"status": "nack", "reason": "query required"}
+                        elif not prismcortex_available():
+                            execution = {
+                                "status": "ok",
+                                "explain": {"ok": False, "reason": "prismcortex not installed", "demo": True},
+                            }
+                        else:
+                            try:
+                                result = explain(params.get("tenant_id") or "default", query)
+                                execution = {"status": "ok", "explain": result}
+                            except Exception as exc:  # noqa: BLE001
+                                execution = {"status": "nack", "reason": str(exc)}
+                    elif etype == "cortex.sleep":
+                        from choruscontrol.services.cortex_ops import prismcortex_available, sleep_tenant
+
+                        if not prismcortex_available():
+                            execution = {
+                                "status": "ok",
+                                "sleep": {
+                                    "ok": False,
+                                    "outcome": "skipped",
+                                    "reason": "prismcortex not installed",
+                                    "demo": True,
+                                },
+                            }
+                        else:
+                            try:
+                                result = sleep_tenant(params.get("tenant_id") or "default")
+                                job = await state.jobs.trigger_sleep(
+                                    params.get("tenant_id") or "default"
+                                )
+                                execution = {"status": "ok", "sleep": result, "job_id": job.job_id}
+                            except Exception as exc:  # noqa: BLE001
+                                execution = {"status": "nack", "reason": str(exc)}
+                    elif etype == "cortex.conflict_resolve":
+                        from choruscontrol.services.cortex_ops import (
+                            prismcortex_available,
+                            resolve_conflict as cx_resolve,
+                        )
+
+                        subject = params.get("subject") or params.get("conflict_id")
+                        relation = params.get("relation") or "is"
+                        chosen = params.get("chosen_value") or params.get("resolution") or "keep_new"
+                        if not subject:
+                            execution = {"status": "nack", "reason": "subject/conflict_id required"}
+                        elif not prismcortex_available():
+                            execution = {
+                                "status": "ok",
+                                "resolve": {
+                                    "ok": False,
+                                    "reason": "prismcortex not installed",
+                                    "demo": True,
+                                },
+                            }
+                        else:
+                            try:
+                                result = cx_resolve(
+                                    params.get("tenant_id") or "default",
+                                    str(subject),
+                                    str(relation),
+                                    str(chosen),
+                                )
+                                cascade = await state.cascade.run(
+                                    params.get("tenant_id") or "default",
+                                    [f"cortex:conflict:{subject}"],
+                                    reason="cortex_conflict_resolve",
+                                )
+                                execution = {"status": "ok", "resolve": result, "cascade": cascade}
+                            except Exception as exc:  # noqa: BLE001
+                                execution = {"status": "nack", "reason": str(exc)}
+                    else:
+                        execution = {"status": "nack", "reason": f"unsupported execute {execute}"}
                 await state.audit.log_action(
                     principal_user,
                     "assistant.execute",

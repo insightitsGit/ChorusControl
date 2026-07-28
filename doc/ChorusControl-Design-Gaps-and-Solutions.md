@@ -348,7 +348,7 @@ Honesty banners required in UI:
 | Overview | `/overview` | health matrix, **caps**, token-tax, Driver latency, dogfood, **fleet topology summary** |
 | Trace | `/trace` | live wire WS, ledger, **Guard→Ledger→Shine** stitch, zero-token replay |
 | Taxonomy | `/taxonomy` | 64-d search, category tree, chunk health, reindex, **partition/warm ops** |
-| Memory | `/memory` | bitemporal facts, sleep, conflicts, **cascade on resolve**, explain/recall_at proxy |
+| Memory | `/memory` | **UI → Cortex** (AG-001 deliberate). APIs `/api/v1/memory/*` remain. |
 | Cortex | `/cortex` | PrismCortex activity, chunks, digest/recall/sleep |
 | Guard | `/guard` | logs, shadow compare, lexicon, **Policy Studio** |
 | Logs | `/logs` | Ops log bus search + live WS |

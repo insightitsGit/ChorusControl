@@ -50,6 +50,8 @@ def create_app() -> FastAPI:
             "/api/v1/fleet/ack",
             "/api/v1/fleet/ledger-batch",
             "/api/v1/fleet/logs-batch",
+            # BUG-017: Assistant ask stays reachable in grace; mutating executes denied inside handler
+            "/api/v1/assistant/ask",
             "/docs",
             "/openapi.json",
             "/redoc",
@@ -151,6 +153,7 @@ def create_app() -> FastAPI:
 
     @app.get("/memory", response_class=HTMLResponse)
     async def memory_alias(request: Request):
+        """AG-001 deliberate: Memory UI consolidated into Cortex; APIs stay under /api/v1/memory/*."""
         from starlette.responses import RedirectResponse
 
         return RedirectResponse(url="/cortex", status_code=307)
