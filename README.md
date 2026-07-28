@@ -2,15 +2,15 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.2-informational)](https://github.com/insightitsGit/ChorusControl)
+[![Version](https://img.shields.io/badge/version-0.1.3-informational)](https://github.com/insightitsGit/ChorusControl)
 [![CI](https://img.shields.io/badge/tests-51%20passing-brightgreen)](https://github.com/insightitsGit/ChorusControl)
 
 **AI Operations Platform for the Prism / Chorus stack — mother control plane + lightweight fleet agents.**  
 Govern, observe, and correct production AI fleets without putting Side 1 (billing) or phone-home inside the customer VPC.
 
 ```bash
-# After v0.1.2 is on PyPI:
-pip install "choruscontrol[server,postgres,prism]==0.1.2"
+# After v0.1.3 is on PyPI:
+pip install "choruscontrol[server,postgres,prism]==0.1.3"
 
 # Until then (or for tip-of-main):
 # pip install "choruscontrol[server,agent] @ git+https://github.com/insightitsGit/ChorusControl.git@main"
@@ -32,7 +32,7 @@ ChorusControl is the **self-hosted ops layer** above ChorusGraph, PrismGuard, Pr
 
 | Layer | Role |
 |-------|------|
-| **Mother** | FastAPI AI Ops UI + control APIs (Overview, Trace, Taxonomy, Cortex, Guard, **Logs**, Admin) |
+| **Mother** | FastAPI AI Ops UI + control APIs (Overview, Trace, Taxonomy, Cortex, Guard, **Logs**, Admin incl. **Client AI chats**) · **Ops Assistant** (teach + gated execute) |
 | **Fleet agent** | Background-only join / heartbeat / commands / optional log+ledger export — **zero hot-path latency** on invoke/digest/recall |
 | **Correction cascade** | Cortex conflict → cache invalidate → Graph `mark_revalidate` → Shine consistency — one audited action |
 | **License** | Offline Ed25519 verify (Side 1 JWT) + optional ~14-day online revoke check |
@@ -53,7 +53,8 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 
 | Pain | ChorusControl answer |
 |------|----------------------|
-| Many Prism nodes, no single ops surface | Seven-tab mother (incl. **Logs**) + Ops Assistant grounded in live telemetry |
+| Many Prism nodes, no single ops surface | Seven-tab mother (incl. **Logs**) + Ops Assistant that **teaches and gated-executes** every tab |
+| End-user AI chat sprawl on disk | Admin **Client AI chats** + PrismCortex compact / prune |
 | One mother, many ChorusGraph workers | Fleet registry + per-`node_id` ledger / ops logs (filter in Logs tab) |
 | Fact correction doesn’t flush caches | **Correction cascade** (invalidate + revalidate + audit) |
 | Dashboards that lie about capabilities | **Honest caps** + DEMO labels when NullAdapters are in use |
@@ -64,8 +65,8 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 ### Customer path (after pip)
 
 1. Buy **Enterprise** (CONTROL) → paste `CHORUSCONTROL_LICENSE_KEY`.  
-2. **Production:** `pip install "choruscontrol[server,postgres,prism]==0.1.2"`  
-   **Demo only:** `pip install "choruscontrol[server]==0.1.2"` + `DEMO_MODE=1`  
+2. **Production:** `pip install "choruscontrol[server,postgres,prism]==0.1.3"`  
+   **Demo only:** `pip install "choruscontrol[server]==0.1.3"` + `DEMO_MODE=1`  
 3. `choruscontrol serve` → **mother = dashboard + API** at `/overview` (you host it; we do not).  
 4. Optional: `choruscontrol-agent` on workers with a join token from Admin.
 
@@ -206,15 +207,23 @@ attach_agent()
 | **Overview** | Fleet topology, health matrix, transparent AI Score, live pipeline viz, **Ops logs** live strip |
 | **Trace** | Guard → Ledger → Shine wire; multi-node Route Ledger; zero-token replay |
 | **Taxonomy** | Partition warm / reindex jobs; PrismRAG when pinned |
-| **Cortex** | PrismCortex activity, chunks, digest / recall / sleep |
+| **Cortex** | PrismCortex activity, chunks, digest / recall / sleep / conflict resolve |
 | **Guard studio** | Ingress profiles, shadow compare (feature-gated) |
 | **Logs** | Searchable ops log bus (audit, fleet, ledger, cascade, agent push) + realtime `WS /api/v1/logs/live` |
-| **Admin** | License, doctor, tenants, stack licenses, SOC2 export pack, compliance scan |
-| **Ops Assistant** | Guard → ChorusGraph → Shine wire + grounded answers; gated execute; **plain-English teach mode** for every tab ([doc/Ops-Assistant.md](doc/Ops-Assistant.md)) |
+| **Admin** | License, doctor, tenants, stack licenses, SOC2 export, compliance scan, **Client AI chats** (end-user sessions + PrismCortex compact) |
+| **Ops Assistant** | Teach every tab value in plain English; **gated execute** for the same actions as tab buttons (reindex, cascade, cortex sleep, compact chats, join token, …) — [doc/Ops-Assistant.md](doc/Ops-Assistant.md) · prompt map [doc/Ops-Assistant-Actions.md](doc/Ops-Assistant-Actions.md) |
 | **Cascade** | Conflict resolve → invalidate → `mark_revalidate` → fleet ACKs |
-| **Multi-agent fleet** | One mother · many agents (`max_nodes`); filter Logs / Trace by `node_id` |
+| **Multi-agent fleet** | One mother · many agents (`max_nodes`); filter Logs / Trace by `node_id`; optional `fleet/chat-batch` + `logs-batch` |
 | **License** | Offline Ed25519 + 14-day grace; optional Side 1 `/validate` |
 | **Exec / Eng modes** | Overview lenses for business vs engineering |
+
+### Client AI chats (Admin)
+
+End-user / app conversations (not Ops Assistant history): sessions in SQLite → **Compact** digests into PrismCortex and prunes raw bodies. Agents push via `POST /api/v1/fleet/chat-batch`; operators via `/api/v1/chats/ingest`. Design: [doc/Client-Chats.md](doc/Client-Chats.md) · COMPLETE-DESIGN §3.7.4a.
+
+### Ops Assistant actionable catalog
+
+Ask **“What can you do on taxonomy?”** (or any tab). Run prompts (e.g. “Reindex taxonomy”, “Create join token”, “Compact raw client chat sessions”) propose Confirm buttons that call the same mother APIs as the UI. Agent KB: [doc/Ops-Assistant-Actions.md](doc/Ops-Assistant-Actions.md).
 
 ### Ops Logs (mother)
 
@@ -230,7 +239,7 @@ Mother ships a unified **ops log bus** (SQLite-backed) for platform events — n
 
 Captured sources include mother **audit**, **fleet** join/heartbeat/ack, **ledger** batches, **cascade**, and boot **system** lines. Multi-worker ChorusGraph **execution** truth still flows primarily through **Trace** via async `LEDGER_BATCH` (`/api/v1/fleet/ledger-batch`) per §3.19.6b.
 
-> **Install note:** Logs UI is on **tip-of-main** (mother package only). PyPI `0.1.2` does not include it yet — use a git install or wait for the next patch release.
+> **Install note:** `0.1.3` mother wheel includes Ops Logs, Client AI chats, and Ops Assistant per-tab execute catalog. Prefer `==0.1.3` (or tip-of-main) over `0.1.2`.
 
 ---
 
@@ -240,9 +249,9 @@ Captured sources include mother **audit**, **fleet** join/heartbeat/ack, **ledge
                     Customer VPC (Side 2)
 ┌──────────────────────────────────────────────────────────┐
 │  Mother  :8443                                           │
-│  UI tabs (… Logs …) · /api/v1 · jobs · cascade · audit · ops_logs · SQLite/PG │
+│  UI tabs (… Logs … Admin Client chats …) · /api/v1 · jobs · cascade · audit · ops_logs · client_chats · SQLite/PG │
 └─────────────┬────────────────────────────────────────────┘
-              │ HTTP join / heartbeat / commands / ledger-batch / logs-batch (primary)
+              │ HTTP join / heartbeat / commands / ledger-batch / logs-batch / chat-batch (primary)
               │ Fabric optional (invalidation mesh — not browser Logs WS)
      ┌────────┼────────┬────────────┐
      ▼        ▼        ▼            ▼
@@ -331,11 +340,16 @@ Handoff contract: [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com
 
 | Doc | Contents |
 |-----|----------|
-| [doc/ChorusControl-COMPLETE-DESIGN.md](doc/ChorusControl-COMPLETE-DESIGN.md) | Full design authority |
+| [doc/README.md](doc/README.md) | Design doc index |
+| [doc/ChorusControl-COMPLETE-DESIGN.md](doc/ChorusControl-COMPLETE-DESIGN.md) | Full design authority (**v1.8.1**) |
+| [doc/Ops-Assistant.md](doc/Ops-Assistant.md) | Dashboard literacy + gated execute |
+| [doc/Ops-Assistant-Actions.md](doc/Ops-Assistant-Actions.md) | **Per-tab prompt → execute.type** (agent KB) |
+| [doc/Client-Chats.md](doc/Client-Chats.md) | End-user chat history + PrismCortex compact |
 | [doc/Healthcare-Demo.md](doc/Healthcare-Demo.md) | Aurora Health walkthrough |
 | [doc/ChorusControl-Enterprise-Depth.md](doc/ChorusControl-Enterprise-Depth.md) | Phase 3–6 depth shipped |
 | [doc/ChorusControl-Future-Mother-HA.md](doc/ChorusControl-Future-Mother-HA.md) | Deferred multi-region HA |
 | [doc/PACKAGING.md](doc/PACKAGING.md) | Wheels, extras, containers |
+| [doc/Side1-insightits-com-Handoff.md](doc/Side1-insightits-com-Handoff.md) | Commercial portal / license issuance |
 
 ---
 

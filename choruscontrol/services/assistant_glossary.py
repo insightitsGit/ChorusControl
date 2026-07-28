@@ -239,6 +239,30 @@ DOCTOR_PLAIN: dict[str, dict[str, str]] = {
         "bad": "Treating export as ‘we are SOC2 certified’",
         "tab": "/admin",
     },
+    "client_ai_chats": {
+        "means": "History of end-user / client AI sessions (apps & agents) — not the Ops Assistant drawer on this console.",
+        "how": "Admin → Client AI chats lists sessions; Compact digests a summary into PrismCortex and prunes raw message bodies to shrink SQLite. Ops Assistant can list/open/compact via gated actions.",
+        "good": "Sessions visible; compacted rows show cortex_digest_ref; raw/dirty count stays low",
+        "bad": "Confusing Ops Assistant with customer chat history; leaving raw forever (disk grows)",
+        "tab": "/admin",
+        "action": "Ask Ops Assistant to list or compact, or Admin → Client AI chats",
+    },
+    "chat_compact": {
+        "means": "Digest one session summary into PrismCortex, then prune raw message bodies in SQLite.",
+        "how": "POST /chats/sessions/{id}/compact or Assistant action chats.compact (confirm).",
+        "good": "compact_status=compacted; bytes shrink; cortex_digest_ref set when PrismCortex installed",
+        "bad": "Compacting before you reviewed a session you still need verbatim",
+        "tab": "/admin",
+        "action": "Confirm chats.compact",
+    },
+    "chat_compact_tenant": {
+        "means": "Batch-compact raw/dirty end-user sessions for a tenant.",
+        "how": "POST /chats/compact-tenant or Assistant action chats.compact_tenant.",
+        "good": "raw+dirty drop after confirm",
+        "bad": "Wrong tenant_id",
+        "tab": "/admin",
+        "action": "Confirm chats.compact_tenant",
+    },
 }
 
 LOGS_PLAIN: dict[str, dict[str, str]] = {
@@ -433,6 +457,63 @@ def explain_cortex(snap: dict[str, Any], focus: str | None = None) -> str:
     return f"Cortex live: {live}.\n\n" + _entry_block(key.replace("_", " ").title(), entry, live)
 
 
+def explain_client_chats(snap: dict[str, Any], focus: str | None = None) -> str:
+    """Teach Admin Client AI chats (end-user) — distinct from this Ops Assistant."""
+    ch = snap.get("chats") or {}
+    sessions = ch.get("sessions") or []
+    live = (
+        f"sessions={ch.get('count', 0)}; raw={ch.get('raw', 0)}; dirty={ch.get('dirty', 0)}; "
+        f"compacted={ch.get('compacted', 0)}; tenant_hint={ch.get('tenant_hint') or snap.get('tenant_hint') or 'default'}"
+    )
+    lines = [
+        f"Client AI chats live: {live}.",
+        "",
+        _entry_block("Client AI chats", DOCTOR_PLAIN["client_ai_chats"], live),
+    ]
+    if focus in ("chat_compact", "compact"):
+        lines.append("")
+        lines.append(_entry_block("Compact one session", DOCTOR_PLAIN["chat_compact"], live))
+    if focus in ("chat_compact_tenant", "compact_tenant", "batch"):
+        lines.append("")
+        lines.append(_entry_block("Compact tenant", DOCTOR_PLAIN["chat_compact_tenant"], live))
+
+    lines.append("")
+    lines.append("**What to do**")
+    lines.append(
+        "1. Open Admin → Client AI chats (or ask me to **list client chats**). "
+        "2. Open a session to read turns. "
+        "3. **Compact** when you no longer need full verbatim text — PrismCortex keeps a dense summary; SQLite bodies prune. "
+        "4. New turns after compact mark the session **dirty** until you compact again."
+    )
+    lines.append("")
+    lines.append(
+        "**Not this chat:** Ops Assistant is for mother ops literacy + gated actions. "
+        "Client AI chats are end-user conversations ingested from apps/agents."
+    )
+    if sessions:
+        lines.append("")
+        lines.append("Recent sessions:")
+        for s in sessions[:8]:
+            lines.append(
+                f"- `{s.get('session_id')}` · {s.get('title') or 'untitled'} · "
+                f"tenant={s.get('tenant_id')} · msgs={s.get('message_count')} · "
+                f"**{s.get('compact_status')}**"
+            )
+    else:
+        lines.append("")
+        lines.append(
+            "No sessions yet. Agents POST `/api/v1/fleet/chat-batch` or operators "
+            "`POST /api/v1/chats/ingest` — then they appear here."
+        )
+    raw_n = int(ch.get("raw") or 0) + int(ch.get("dirty") or 0)
+    if raw_n:
+        lines.append("")
+        lines.append(
+            f"**{raw_n}** session(s) are raw/dirty — confirm **chats.compact_tenant** to shrink storage via PrismCortex."
+        )
+    return "\n".join(lines)
+
+
 def explain_doctor(snap: dict[str, Any], focus: str | None = None) -> str:
     d = snap.get("doctor") or {}
     pins = d.get("pins") or {}
@@ -485,6 +566,19 @@ def explain_doctor(snap: dict[str, Any], focus: str | None = None) -> str:
             TAXONOMY_PLAIN["taxonomy_packs"],
             f"ready={packs.get('ready')}; hint={packs.get('install_hint') or d.get('install_hint')}",
         )
+    if focus in (
+        "client_ai_chats",
+        "client chats",
+        "client chat",
+        "end user chats",
+        "end-user chats",
+        "chat_compact",
+        "chat_compact_tenant",
+        "compact",
+        "compact_tenant",
+        "batch",
+    ):
+        return explain_client_chats(snap, focus=focus)
     key = focus or "license"
     # map aliases
     alias = {
@@ -494,6 +588,11 @@ def explain_doctor(snap: dict[str, Any], focus: str | None = None) -> str:
         "adapter": "adapters",
         "join": "join_token",
         "finding": "compliance",
+        "client_ai_chats": "client_ai_chats",
+        "client chats": "client_ai_chats",
+        "client chat": "client_ai_chats",
+        "end user chats": "client_ai_chats",
+        "end-user chats": "client_ai_chats",
     }.get(key, key)
     entry = DOCTOR_PLAIN.get(alias) or DOCTOR_PLAIN["license"]
     return f"Admin / Doctor live: {live}.\n\n" + _entry_block(

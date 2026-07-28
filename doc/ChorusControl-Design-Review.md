@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Reviews | [ChorusControl-COMPLETE-DESIGN.md](./ChorusControl-COMPLETE-DESIGN.md) v1.7.0 |
+| Reviews | [ChorusControl-COMPLETE-DESIGN.md](./ChorusControl-COMPLETE-DESIGN.md) **v1.7.0** (historical); current design **v1.8.0** adds §3.7.4a Client AI chats + §11.6 execute matrix |
 | Scope | Independent review — architecture risks (R01–R08) + product suggestions (I01–I05) |
 | Status | Open — items to resolve before / during sprint 0 |
 | Date | July 2026 |

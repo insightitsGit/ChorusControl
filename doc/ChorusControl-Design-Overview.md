@@ -5,8 +5,8 @@
 | Product | **ChorusControl — Enterprise AI Operating System** |
 | Subtitle | AI Operations Platform for Enterprise AI |
 | Portal | www.insightits.com (Side 1 — future handoff) |
-| Design version | 1.7.0 |
-| Status | Design complete — implementation not started |
+| Design version | **1.8.1** |
+| Status | Design complete — Side 2 implemented (see Implementation Plan) |
 | Date | July 2026 |
 
 **Canonical full text:** [ChorusControl-COMPLETE-DESIGN.md](./ChorusControl-COMPLETE-DESIGN.md)
@@ -25,7 +25,7 @@
 
 ## System picture
 
-Mother (`choruscontrol[server]`) + fleet agents (`choruscontrol[agent]`) over Fabric/PrismAPI; zero hot-path latency; offline license; Side 1 issues keys later.
+Mother (`choruscontrol[server]`) + fleet agents (`choruscontrol[agent]`) over HTTP (Fabric optional); zero hot-path latency; offline license; Side 1 issues keys later.
 
 ---
 
@@ -33,28 +33,30 @@ Mother (`choruscontrol[server]`) + fleet agents (`choruscontrol[agent]`) over Fa
 
 Governance · Observability · Security · Operations · Intelligence · Ecosystem
 
-## Defining capabilities (staged)
+## Defining capabilities (staged vision; Side 2 ships foundations)
 
-| Capability | Phase |
-|------------|-------|
-| Mother + agent + six tabs + cascade/caps | 1–2 |
+| Capability | Phase / § |
+|------------|-----------|
+| Mother + agent + tabs + cascade/caps | 1–2 |
 | **Enterprise AI Asset Graph** | 3 |
 | Incident / version / policy engine | 4–5 |
 | **AI Score** + predictive | 5 |
 | Exec + Eng experiences | 4–5 |
-| **AI Operations Assistant** | 6 |
+| **AI Operations Assistant** (literacy + **full tab execute catalog**) | 6 · [Ops-Assistant-Actions.md](./Ops-Assistant-Actions.md) |
+| **Client AI chat history** (Admin + PrismCortex compact) | §3.7.4a · [Client-Chats.md](./Client-Chats.md) |
+| Ops Logs bus | `/logs` |
 
 ---
 
 ## Lifecycle
 
-Develop → Deploy → Observe → Govern → Evaluate → Improve → Audit → Scale
+Develop → Deploy → Observe → Govern → Evaluate → Improve → Audit · Scale
 
 ---
 
 ## Hard rules
 
-Mother once / agent everywhere · zero hot-path latency · Fabric primary · async ledger · honest caps · no fake Score/Assistant · unified platform · everything connected via Asset Graph.
+Mother once / agent everywhere · zero hot-path latency · HTTP primary (Fabric optional) · async ledger · honest caps · no fake Score/Assistant · unified platform · everything connected via Asset Graph.
 
 ---
 
@@ -64,4 +66,4 @@ Manage an intelligent AI organization like cloud infrastructure — observable, 
 
 ---
 
-*Insight IT Solutions LLC — ChorusControl Design Overview v1.7.0*
+*Insight IT Solutions LLC — ChorusControl Design Overview v1.8.1*

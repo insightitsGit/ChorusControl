@@ -7,7 +7,20 @@
 | Baseline at handoff | **34/34** tests passing (`pytest -q`); UI themed (dark/light) — do not regress either |
 | Version | 1.1.0 |
 | Date | July 2026 |
-| Status | **WP1–WP12 implemented** — see gap report |
+| Status | **WP1–WP12 implemented** · later: Ops Logs, HO-009 Assistant literacy, §3.7.4a Client AI chats |
+
+---
+
+## Post-WP addenda (shipped)
+
+| Addendum | Design | Code / tests |
+|----------|--------|--------------|
+| Ops Logs bus | `/logs` tab · fleet logs-batch | `services/ops_logs.py`, `tests/test_ops_logs.py` |
+| Ops Assistant literacy | §11.6 · [Ops-Assistant.md](./Ops-Assistant.md) | `assistant_glossary.py`, HO-009 tests |
+| **Client AI chats** | §3.7.4a · [Client-Chats.md](./Client-Chats.md) | `client_chats.py`, Admin UI, Assistant `chats.*` + `cortex.*` execute |
+| **Assistant action catalog** | §11.6 · [Ops-Assistant-Actions.md](./Ops-Assistant-Actions.md) | `assistant_actions.py` — per-tab prompts → gated execute |
+
+Keep zero hot-path latency when extending ingest/compact.
 
 ---
 
@@ -32,7 +45,9 @@
 | License middleware + open paths | `choruscontrol/server.py` |
 | Fleet registry / join / commands | `choruscontrol/fleet/registry.py` |
 | Agent runtime / ledger / transport | `choruscontrol/agent/{runtime,ledger,transport}.py` |
-| SQLite store + schema | `choruscontrol/persistence/__init__.py` |
+| SQLite store + schema | `choruscontrol/persistence/__init__.py` (incl. `client_chat_*`) |
+| Client AI chats | `choruscontrol/services/client_chats.py` · `/api/v1/chats/*` · `/fleet/chat-batch` |
+| Ops Assistant | `choruscontrol/services/assistant.py` (+ glossary) · `POST /assistant/ask` |
 | Settings | `choruscontrol/config.py` (env prefix `CHORUSCONTROL_`) |
 | Job queue | `choruscontrol/engine/job_queue.py`; handlers registered in `app_state.py` |
 | SOC2 zip | `routes.py` → `soc2_export` (`GET /api/v1/admin/soc2-export`) |

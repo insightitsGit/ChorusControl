@@ -126,44 +126,55 @@ const TAB_SUGGESTS = {
     ["Performance 0?", "Why is Performance 0?"],
     ["Layers", "Explain L0 through L5 health"],
     ["Cascade", "What does cascade completed mean?"],
+    ["Run cascade", "Run correction cascade"],
     ["Agents", "Who are the agents and what do they do?"],
-    ["GREEN vs ORANGE", "Explain GREEN vs ORANGE"],
+    ["Actions?", "What can you do on overview?"],
   ],
   trace: [
     ["Zero-token replay", "What is zero-token replay?"],
     ["What is a run?", "What is a run_id on Trace?"],
     ["Wire stages", "What do Guard Graph Shine wire stages mean?"],
-    ["Ledger", "What is the Route Ledger?"],
+    ["Seed trace", "Seed demo trace"],
+    ["Replay", "Replay the trace"],
+    ["Actions?", "What can you do on trace?"],
   ],
   taxonomy: [
     ["PrismRAG engine", "What does Taxonomy engine prismrag-patch mean?"],
     ["Partition version", "What is a partition version?"],
     ["Staleness", "What does chunk staleness mean?"],
-    ["taxonomy_packs", "What is taxonomy_packs.ready?"],
+    ["Reindex", "Reindex taxonomy"],
+    ["Warm", "Warm partition"],
+    ["Actions?", "What can you do on taxonomy?"],
   ],
   cortex: [
     ["Digest", "What does Cortex digest committed mean?"],
     ["Recall", "What does Cortex recall mean?"],
     ["Sleep", "What does Cortex sleep consolidated mean?"],
-    ["Engine", "What does PrismCortex engine mean?"],
+    ["Run sleep", "Run cortex sleep for this tenant"],
+    ["Run digest", "Run cortex digest"],
+    ["Actions?", "What can you do on cortex?"],
   ],
   guard: [
     ["Shadow compare", "What is Guard shadow compare?"],
+    ["Run compare", "Run shadow compare"],
     ["Ingress profile", "What does Guard ingress_profile mean?"],
     ["Lexicon", "What is the Guard lexicon for?"],
-    ["Shadow vs enforce", "What does shadow_enabled vs enforce_shadow mean?"],
+    ["Actions?", "What can you do on guard?"],
   ],
   logs: [
     ["Ops logs", "What are Ops Logs?"],
+    ["Search fleet", "Show fleet logs"],
     ["Sources", "What do log source filters mean?"],
     ["Node filter", "How do I filter logs by node_id?"],
-    ["Levels", "What do log levels mean?"],
+    ["Actions?", "What can you do on logs?"],
   ],
   admin: [
     ["Pin floors", "What do pin floors mean? Core vs optional?"],
-    ["taxonomy_packs", "What is taxonomy_packs.ready?"],
-    ["License", "What does license valid vs grace mean?"],
-    ["SOC2 export", "What is the SOC2 export zip?"],
+    ["Client chats", "What are Client AI chats on Admin?"],
+    ["Compact chats", "Compact raw client chat sessions"],
+    ["Join token", "Create join token"],
+    ["Compliance", "Run compliance scan"],
+    ["Actions?", "What can you do on admin?"],
   ],
 };
 
@@ -295,13 +306,13 @@ async function askAssistant(question, { confirm = false, execute = null } = {}) 
           : ""
       }</div>` + html;
   }
-  if (r.actions?.length) {
+    if (r.actions?.length) {
     html += `<div style="margin-top:0.5rem">${r.actions
       .map(
         (a, i) =>
           `<button type="button" class="btn secondary" style="margin:0.2rem 0.2rem 0 0;font-size:0.72rem" data-exec='${escapeHtml(
             JSON.stringify(a)
-          )}' data-qi="${i}">${escapeHtml(a.command || a.type || "action")}</button>`
+          )}' data-qi="${i}">${escapeHtml(a.label || a.command || a.type || "action")}</button>`
       )
       .join("")}</div>`;
   }
@@ -2226,6 +2237,47 @@ async function renderAdmin(payload) {
         170
       )}
     </div>
+    ${section(
+      "Client AI chats",
+      `<p class="score-meta" style="margin:0 0 0.75rem">End-user sessions from apps/agents — <strong>not</strong> Ops Assistant. Grouped by session; Compact digests into PrismCortex and prunes raw bodies.</p>
+       <p style="margin:0 0 0.75rem">${btn("Refresh chats", "refreshChats", "secondary")} ${btn(
+         "Compact raw (tenant)",
+         "compactChats",
+         "secondary"
+       )}</p>
+       <table class="data" id="chatSessionsTable"><thead><tr><th>Title</th><th>Tenant</th><th>Msgs</th><th>Status</th><th></th></tr></thead>
+       <tbody>${
+         (payload.chats?.sessions || [])
+           .slice(0, 40)
+           .map(
+             (c) =>
+               `<tr data-session="${escapeHtml(c.session_id)}">
+                 <td>${escapeHtml(c.title || c.session_id.slice(0, 8))}</td>
+                 <td><code>${escapeHtml(c.tenant_id || "")}</code></td>
+                 <td>${c.message_count ?? 0}</td>
+                 <td>${escapeHtml(c.compact_status || "raw")}</td>
+                 <td><button type="button" class="btn secondary chat-open" data-sid="${escapeHtml(
+                   c.session_id
+                 )}" style="padding:0.15rem 0.45rem;font-size:0.72rem">Open</button>
+                 ${
+                   c.compact_status !== "compacted"
+                     ? `<button type="button" class="btn secondary chat-compact" data-sid="${escapeHtml(
+                         c.session_id
+                       )}" style="padding:0.15rem 0.45rem;font-size:0.72rem">Compact</button>`
+                     : ""
+                 }</td>
+               </tr>`
+           )
+           .join("") ||
+         `<tr><td colspan="5" class="empty">No end-user sessions yet — agents POST /api/v1/fleet/chat-batch or operators POST /api/v1/chats/ingest</td></tr>`
+       }</tbody></table>
+       <div id="chatSessionDetail" style="margin-top:1rem;display:none">
+         <div class="section-head"><h2 style="font-size:0.9rem">Session detail</h2></div>
+         <pre id="chatSessionBody" style="margin:0.5rem 0 0;padding:0.85rem;background:var(--paper-2);border-radius:var(--radius);font-size:0.75rem;max-height:280px;overflow:auto;white-space:pre-wrap"></pre>
+       </div>`,
+      "PrismCortex compact storage",
+      180
+    )}
   `;
 
   document.getElementById("mkToken").onclick = async () => {
@@ -2276,6 +2328,64 @@ async function renderAdmin(payload) {
       load();
     };
   }
+
+  const refreshChats = document.getElementById("refreshChats");
+  if (refreshChats) {
+    refreshChats.onclick = () => load();
+  }
+  const compactChats = document.getElementById("compactChats");
+  if (compactChats) {
+    compactChats.onclick = async () => {
+      const tid =
+        (payload.chats?.sessions || []).find((c) => c.compact_status !== "compacted")?.tenant_id ||
+        "default";
+      const r = await j("/api/v1/chats/compact-tenant", {
+        method: "POST",
+        body: JSON.stringify({ tenant_id: tid, limit: 20 }),
+      });
+      out.textContent = JSON.stringify(r, null, 2);
+      appendChat("bot", `Compacted ${r.compacted || 0} end-user chat session(s) for ${tid}`);
+      load();
+    };
+  }
+  view.querySelectorAll(".chat-open").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const sid = el.getAttribute("data-sid");
+      const detail = await j(`/api/v1/chats/sessions/${encodeURIComponent(sid)}`);
+      const box = document.getElementById("chatSessionDetail");
+      const body = document.getElementById("chatSessionBody");
+      if (box) box.style.display = "block";
+      if (body) {
+        const lines = (detail.messages || []).map(
+          (m) => `${m.role}: ${m.content}${m.pruned ? " [pruned]" : ""}`
+        );
+        body.textContent =
+          `session ${detail.session_id}\nstatus ${detail.compact_status}` +
+          (detail.cortex_digest_ref ? `\ncortex ${detail.cortex_digest_ref}` : "") +
+          (detail.summary ? `\nsummary: ${detail.summary}` : "") +
+          `\n\n` +
+          (lines.join("\n") || "(no messages)");
+      }
+      out.textContent = JSON.stringify(detail, null, 2);
+    });
+  });
+  view.querySelectorAll(".chat-compact").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const sid = el.getAttribute("data-sid");
+      const r = await j(`/api/v1/chats/sessions/${encodeURIComponent(sid)}/compact`, {
+        method: "POST",
+        body: "{}",
+      });
+      out.textContent = JSON.stringify(r, null, 2);
+      appendChat(
+        "bot",
+        `Session ${sid.slice(0, 8)}… compacted · pruned ${r.pruned_messages || 0} msgs · ${
+          r.bytes_before || 0
+        }→~${r.bytes_after_estimate || 0} bytes`
+      );
+      load();
+    });
+  });
 }
 
 async function soft(url, fallback = null) {
@@ -2440,7 +2550,7 @@ async function load() {
       lastRender = () => renderGuard(payload);
       await renderGuard(payload);
     } else if (tab === "admin") {
-      const [doctor, graph, auth, recommendations, stack, tenants, incidents, findings, enterprise] =
+      const [doctor, graph, auth, recommendations, stack, tenants, incidents, findings, enterprise, chats] =
         await Promise.all([
           soft("/api/v1/admin/doctor", {}),
           soft("/api/v1/graph", { assets: [], edges: [] }),
@@ -2451,6 +2561,7 @@ async function load() {
           soft("/api/v1/incidents", { incidents: [] }),
           soft("/api/v1/compliance/findings", { findings: [] }),
           soft("/api/v1/enterprise/policies", { policies: [] }),
+          soft("/api/v1/chats/sessions?limit=50", { sessions: [], count: 0 }),
         ]);
       payload = {
         license: lic,
@@ -2463,6 +2574,7 @@ async function load() {
         incidents,
         findings,
         enterprise,
+        chats,
       };
       lastRender = () => renderAdmin(payload);
       await renderAdmin(payload);

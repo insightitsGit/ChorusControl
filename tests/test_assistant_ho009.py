@@ -149,6 +149,7 @@ STARTER_QUESTIONS = [
     ("What is taxonomy_packs.ready?", ["taxonomy_packs", "ready"]),
     ("What does Cortex digest committed mean?", ["digest"]),
     ("What is zero-token replay?", ["replay", "token"]),
+    ("What are Client AI chats on Admin?", ["Client", "chat"]),
 ]
 
 

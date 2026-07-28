@@ -45,11 +45,12 @@ curl -H "Authorization: Bearer healthcare-demo-token" http://127.0.0.1:8443/api/
 3. **Taxonomy** — warm / reindex jobs for clinical partitions  
 4. **Cortex** (`/cortex`) — PrismCortex activity log, memory-graph chunks, facts/edges, digest / recall / sleep (seeded for `aurora-health`)  
 5. **Guard** — clinical policy + shadow compare  
-6. **Admin** — license, doctor, stack licenses, tenants, SOC2 export, recommendations  
+6. **Logs** — mother ops log bus (audit / fleet / agent)  
+7. **Admin** — license, doctor, stack licenses, tenants, **Client AI chats** (end-user sessions + Compact), SOC2 export, recommendations  
 
 Ops Assistant (FAB): **Guard → ChorusGraph → Shine** wire on every ask, then plain-English
-answers from live Overview / agent catalog. Rail **Light / Dark** theme switch. Ask about
-fleet, AI Score, policy drift, cascades, or **what each agent does**.
+answers from live telemetry. Can **teach** Client AI chats / Cortex and **gated-execute**
+`chats.*` / `cortex.*` after Confirm. Rail **Light / Dark** theme switch.
 
 ## Re-seed against a running mother
 

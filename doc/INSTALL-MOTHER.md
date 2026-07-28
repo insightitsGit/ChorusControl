@@ -12,7 +12,7 @@
 Production one-liner (current release):
 
 ```bash
-pip install "choruscontrol[server,postgres,prism]==0.1.2"
+pip install "choruscontrol[server,postgres,prism]==0.1.3"
 ```
 
 Taxonomy in non-demo **requires** PrismRAG + PrismGuard (both in `[prism]`). Without them, Taxonomy APIs return **503** with an install hint — not silent DEMO.
@@ -33,7 +33,7 @@ Doctor prints `version`, `pins` (core vs optional), `taxonomy_packs`, and `insta
 ## Reference container
 
 ```bash
-docker build -f docker/Dockerfile.mother -t choruscontrol-mother:0.1.2 .
+docker build -f docker/Dockerfile.mother -t choruscontrol-mother:0.1.3 .
 ```
 
 Root `Dockerfile` also installs `[server,agent,postgres,prism]` for production images. Use `Dockerfile.demo` / healthcare compose for DEMO.

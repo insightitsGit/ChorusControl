@@ -1,3 +1,3 @@
 """ChorusControl — AI Operations Platform for Prism / Chorus."""
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"

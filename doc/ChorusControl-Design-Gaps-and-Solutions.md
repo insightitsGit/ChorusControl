@@ -6,7 +6,7 @@
 | Product | **ChorusControl — Enterprise AI Operating System** (AI Operations Platform) |
 | Technical role | Self-hosted mother + fleet agent architecture for Prism / Chorus |
 | Document | Design Gaps Analysis & Resolved Architecture |
-| Version | 1.7.0 |
+| Version | 1.8.0 |
 | Status | Approved for implementation |
 | Date | July 2026 |
 | Relates to | *ChorusControl Architecture & Design Spec* v1.0.0 |
@@ -349,8 +349,10 @@ Honesty banners required in UI:
 | Trace | `/trace` | live wire WS, ledger, **Guard→Ledger→Shine** stitch, zero-token replay |
 | Taxonomy | `/taxonomy` | 64-d search, category tree, chunk health, reindex, **partition/warm ops** |
 | Memory | `/memory` | bitemporal facts, sleep, conflicts, **cascade on resolve**, explain/recall_at proxy |
+| Cortex | `/cortex` | PrismCortex activity, chunks, digest/recall/sleep |
 | Guard | `/guard` | logs, shadow compare, lexicon, **Policy Studio** |
-| Admin | `/admin` | ChorusControl license, **stack license status**, tenants, audit/export, RBAC, support link, doctor snapshot |
+| Logs | `/logs` | Ops log bus search + live WS |
+| Admin | `/admin` | License, stack licenses, tenants, doctor, **Client AI chats** (§3.7.4a), audit/export, RBAC |
 
 ---
 
@@ -444,6 +446,23 @@ Trace event schema (v1):
 
 Prefer Cortex HTTP enterprise surfaces (`/conflicts`, `/explain`, `/recall_at`, replay certificate) via adapter — ChorusControl adds RBAC, audit, and cascade, **not** a second graph store.
 
+#### 3.7.4a End-user client AI chat history (Admin)
+
+**Canonical detail:** [ChorusControl-COMPLETE-DESIGN.md](./ChorusControl-COMPLETE-DESIGN.md) §3.7.4a · [Client-Chats.md](./Client-Chats.md).
+
+**Requirement:** Admin browses **end-user** AI sessions (apps/agents) — not Ops Assistant. Group by `session_id`. **Compact** → PrismCortex digest + prune SQLite bodies.
+
+| Surface | Behavior |
+|---------|----------|
+| SQLite `client_chat_sessions` / `client_chat_messages` | Index + bounded raw turns |
+| `POST /chats/ingest`, `POST /fleet/chat-batch` | Ingest |
+| `GET /chats/sessions{,/id}` | List / detail |
+| `POST .../compact`, `POST /chats/compact-tenant` | Compact |
+| Admin UI **Client AI chats** | List · open · compact |
+| Ops Assistant | Teach + gated `chats.list|get|compact|compact_tenant` |
+
+Statuses: `raw` → `compacted` (or `dirty` after new turns). Hot path out-of-band.
+
 ---
 
 #### 3.7.5 Security WAF `/guard` — Policy Studio (closes G15)
@@ -489,7 +508,7 @@ Never invent `finance_pilot` / `healthcare_pilot` — always `domain_pilot` + `d
 
 ---
 
-#### 3.7.6 Admin & License `/admin` (ties to §3.16, §3.18)
+#### 3.7.6 Admin & License `/admin` (ties to §3.16, §3.18, §3.7.4a)
 
 | API | Behavior |
 |-----|----------|
@@ -500,6 +519,7 @@ Never invent `finance_pilot` / `healthcare_pilot` — always `domain_pilot` + `d
 | RBAC management | §3.3 |
 | Support deep link | Side 1 URL |
 | `GET /admin/doctor` | Snapshot from §3.17 |
+| **Client AI chats** | §3.7.4a — end-user session history + PrismCortex compact |
 
 ---
 
@@ -1398,11 +1418,11 @@ Organization → Project → Agent/Node
 
 ### 11.6 AI Operations Assistant
 
-Native assistant with Asset Graph + subsystem visibility. Primary ops interface for admins/devs/execs **alongside** dashboards (never a replacement).
+Native assistant with Asset Graph + subsystem visibility. Primary ops interface **alongside** dashboards (never a replacement).
 
-Example asks: Why did Finance Agent fail? Prompt-changing deployments? Noisiest policies? Costliest systems? Explain incident. Compare deploy 42 vs 41. Stale knowledge? Upgrade Marketing agents. Compliance report. Review architecture.
+**Dashboard literacy (required):** Teach every primary tab value from live `dashboard_snapshot` — including Admin **Client AI chats** and Cortex controls. See [Ops-Assistant.md](./Ops-Assistant.md) · COMPLETE-DESIGN §11.6.
 
-**Gated execution:** rollback, model upgrade, rebuild indexes, assign policies, reports, open incidents, trigger evals — via same APIs as UI, RBAC + audit + confirm destructive ops. Feature `assistant.ops`. Ground in graph + telemetry; no invented world-truth.
+**Gated execution:** Same APIs as UI, RBAC + audit + Confirm. Feature `assistant.ops`. Full per-tab prompt → execute map: [Ops-Assistant-Actions.md](./Ops-Assistant-Actions.md) (`assistant_actions.py`). Includes `chats.*` (§3.7.4a) and all primary tab actions. No invented world-truth.
 
 ### 11.7 Executive vs engineering experience
 
@@ -1450,8 +1470,9 @@ Manage an **intelligent AI organization**, not isolated agents. Trusted layer fo
 | AI Score + predictive | 5 |
 | Exec / eng experiences | 4–5 |
 | AI Ops Assistant | 6 |
+| Client AI chats (§3.7.4a) | 2+ (with Assistant execute in 6) |
 | Marketplace | Side 1 / late 6 |
 
 ---
 
-*End of document — Insight IT Solutions LLC / ChorusControl Design Gaps & Solutions v1.7.0 — Enterprise AI Operating System*
+*End of document — Insight IT Solutions LLC / ChorusControl Design Gaps & Solutions v1.8.0 — Enterprise AI Operating System*

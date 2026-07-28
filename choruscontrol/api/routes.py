@@ -159,6 +159,30 @@ class FleetLogsBatchBody(BaseModel):
     entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ClientChatIngestBody(BaseModel):
+    """End-user AI chat turns (not Ops Assistant). Operator ingest or agent push."""
+
+    session_id: str | None = None
+    tenant_id: str = "default"
+    node_id: str | None = None
+    user_ref: str | None = None
+    channel: str = "end_user"
+    title: str | None = None
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class FleetChatBatchBody(BaseModel):
+    node_id: str
+    tenant_id: str = "default"
+    session_id: str | None = None
+    user_ref: str | None = None
+    channel: str = "end_user"
+    title: str | None = None
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
 class LexiconBody(BaseModel):
     tenant_id: str = "default"
     terms: list[str]
@@ -1711,6 +1735,144 @@ async def fleet_logs_batch(
         )
         accepted += 1
     return {"accepted": accepted}
+
+
+# --- End-user (client) AI chat history — Admin browse + Cortex compact ---
+
+
+@router.get("/chats/sessions")
+async def chat_sessions_list(
+    request: Request,
+    tenant_id: str | None = None,
+    compact_status: str | None = None,
+    limit: int = 50,
+    _=require_role("viewer"),
+):
+    from choruscontrol.services.client_chats import list_sessions
+
+    s = state(request)
+    sessions = await list_sessions(
+        s.store, tenant_id=tenant_id, limit=limit, compact_status=compact_status
+    )
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.get("/chats/sessions/{session_id}")
+async def chat_session_get(
+    session_id: str, request: Request, include_pruned: bool = False, _=require_role("viewer")
+):
+    from choruscontrol.services.client_chats import get_session
+
+    s = state(request)
+    detail = await get_session(s.store, session_id, include_pruned=include_pruned)
+    if not detail:
+        raise HTTPException(404, detail="session not found")
+    return detail
+
+
+@router.post("/chats/ingest")
+async def chat_ingest(body: ClientChatIngestBody, request: Request, principal=require_role("operator")):
+    """Operator/app ingest of end-user AI chat turns (not Ops Assistant)."""
+    from choruscontrol.services.client_chats import ingest_messages
+
+    s = state(request)
+    _grace_block(s)
+    result = await ingest_messages(
+        s.store,
+        session_id=body.session_id,
+        tenant_id=body.tenant_id,
+        messages=body.messages,
+        node_id=body.node_id,
+        user_ref=body.user_ref,
+        channel=body.channel,
+        title=body.title,
+        meta=body.meta,
+    )
+    await emit_ops(
+        s,
+        source="system",
+        level="info",
+        tenant_id=body.tenant_id,
+        node_id=body.node_id,
+        message=f"client chat ingest session={result.get('session_id')} accepted={result.get('accepted')}",
+        fields={"session_id": result.get("session_id"), "accepted": result.get("accepted")},
+    )
+    await s.audit.log_action(principal.user, "chats.ingest", body.tenant_id, result)
+    return result
+
+
+@router.post("/chats/sessions/{session_id}/compact")
+async def chat_session_compact(
+    session_id: str, request: Request, prune: bool = True, principal=require_role("operator")
+):
+    """Digest session summary into PrismCortex and prune raw message bodies."""
+    from choruscontrol.services.client_chats import compact_session
+
+    s = state(request)
+    _grace_block(s)
+    try:
+        result = await compact_session(s.store, session_id, prune=prune)
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    await emit_ops(
+        s,
+        source="system",
+        level="info",
+        tenant_id=None,
+        message=f"client chat compacted session={session_id} pruned={result.get('pruned_messages')}",
+        fields=result,
+    )
+    await s.audit.log_action(principal.user, "chats.compact", result.get("cortex_digest_ref") or session_id, result)
+    return result
+
+
+@router.post("/chats/compact-tenant")
+async def chat_compact_tenant(request: Request, principal=require_role("operator")):
+    from choruscontrol.services.client_chats import compact_tenant
+
+    s = state(request)
+    _grace_block(s)
+    body = await request.json()
+    tid = str(body.get("tenant_id") or "default")
+    limit = int(body.get("limit") or 20)
+    result = await compact_tenant(s.store, tid, limit=limit)
+    await s.audit.log_action(principal.user, "chats.compact_tenant", tid, {"compacted": result.get("compacted")})
+    return result
+
+
+@router.post("/fleet/chat-batch")
+async def fleet_chat_batch(
+    body: FleetChatBatchBody, request: Request, x_node_session: str | None = Header(default=None)
+):
+    """Agent push of end-user AI chat turns into mother session store."""
+    from choruscontrol.services.client_chats import ingest_messages
+
+    s = state(request)
+    try:
+        await s.fleet.require_session(body.node_id, x_node_session)
+    except ValueError as exc:
+        raise HTTPException(401, detail=str(exc)) from exc
+    result = await ingest_messages(
+        s.store,
+        session_id=body.session_id,
+        tenant_id=body.tenant_id,
+        messages=body.messages,
+        node_id=body.node_id,
+        user_ref=body.user_ref,
+        channel=body.channel,
+        title=body.title,
+        meta=body.meta,
+    )
+    await emit_ops(
+        s,
+        source="agent",
+        level="info",
+        tenant_id=body.tenant_id,
+        node_id=body.node_id,
+        message=f"client chat batch session={result.get('session_id')} accepted={result.get('accepted')}",
+        fields={"session_id": result.get("session_id"), "accepted": result.get("accepted")},
+    )
+    return result
 
 
 @router.websocket("/logs/live")

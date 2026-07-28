@@ -5,7 +5,7 @@
 | Product | ChorusControl — Enterprise AI Operating System |
 | Status | **Side 2 complete** (demo + live-adapter path) |
 | Date | July 2026 |
-| Inputs | COMPLETE-DESIGN v1.7 · Design-Review R01–R08 / I01–I05 |
+| Inputs | COMPLETE-DESIGN **v1.8** · Design-Review R01–R08 / I01–I05 |
 
 > **Rule:** Do not stage work as “Phase 1 / 2 / 3.” Build the complete platform. Work items below are a **dependency-ordered checklist**, not gated releases.
 
@@ -70,11 +70,16 @@
 - [x] AI Score transparent formula
 - [x] Incident table + cascade linkage
 - [x] Ops Assistant ask + gated execute (RBAC + audit)
+- [x] Ops Assistant **dashboard literacy** (every tab value + Client AI chats) — HO-009 / §11.6
+- [x] Ops Assistant gated execute: full per-tab catalog (`assistant_actions.py` / Ops-Assistant-Actions.md)
+- [x] Admin **Client AI chats** — session store, PrismCortex compact, fleet chat-batch (§3.7.4a)
+- [x] Ops Logs tab + agent logs-batch + live WS
 - [x] Metric samples + retention + predictive/RCA recommendations
 - [x] OTel coexistence note in README
 
 ### H. Verification
 - [x] Unit tests: license grace, jobs, cascade, audit, API join, adapters
+- [x] Client chats + assistant teach/execute tests
 - [x] Hot-path latency dedicated harness (S03)
 - [x] Restart soak test automation
 - [x] Demo enroll + compose bootstrap scripts

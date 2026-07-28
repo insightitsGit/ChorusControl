@@ -26,7 +26,8 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 | 3.4 | Invalidation bus | ✅ | broadcaster + ACKs; Fabric live still optional stub |
 | 3.5 | Maintenance job queue | ✅ | sleep/reindex/warm + `cascade.run` + `compliance.scan` |
 | 3.6 | Cryptographic audit | ✅ | JSONL + Postgres dual-write + audit export |
-| 3.7 | Control-plane APIs | ✅ | six tabs (+ Cortex) + tenants + stack licenses + license upload |
+| 3.7 | Control-plane APIs | ✅ | Tabs: Overview/Trace/Taxonomy/Memory/Cortex/Guard/**Logs**/Admin · tenants · stack licenses |
+| 3.7.4a | Client AI chats | ✅ | SQLite sessions + PrismCortex compact · Admin UI · fleet chat-batch · Assistant `chats.*` |
 | 3.8 | Runtime / packaging | ✅ | multi-stage Dockerfiles; compose `--profile postgres` |
 | 3.9 | Integration adapters | ✅ | Null + live pins; stack license parsers |
 | 3.11 | Correction cascade | ✅ | job mutex + cascade.auto poll + CACHE_PREDATES_FACT_UPDATE |
@@ -39,6 +40,7 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 | 3.18 | SOC2 export pack | ✅ | caps + PEM + redaction + feature gate + alias path |
 | 3.19 | Fleet agent | ✅ | TLS external, WS live, REQUEST_METRICS/DRAIN/REVOKE/RUN_REINDEX + memory_endpoint |
 | §11.5 | Asset Graph | ⚠️ | Enriched v1 (tenant/memory/incident/versions); not full Project/Workflow/Model ontology |
+| §11.6 | Ops Assistant | ✅ | Dashboard literacy (all tabs + Client AI chats) · gated execute incl. `chats.*` + `cortex.*` |
 | §11.8 | AI Score | ⚠️ | Transparent formula + RAG staleness inputs; DEMO when NullAdapters |
 | §11.11 | Enterprise policy | ⚠️ | 3 domains enforced; not full multi-domain OS |
 | §11.12 | Incident intelligence | ⚠️ | Graph links + intelligence API + UI; no LLM summary |
@@ -62,4 +64,4 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 
 ---
 
-*Insight IT Solutions LLC — gap report updated after enterprise depth pass*
+*Insight IT Solutions LLC — gap report updated after Client AI chats (§3.7.4a) + Ops Assistant literacy/execute*

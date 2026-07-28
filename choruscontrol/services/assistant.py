@@ -16,6 +16,7 @@ from choruscontrol.services.assistant_glossary import (
     TAXONOMY_PLAIN,
     TRACE_PLAIN,
     explain_cascade,
+    explain_client_chats,
     explain_cortex,
     explain_doctor,
     explain_guard,
@@ -24,6 +25,11 @@ from choruscontrol.services.assistant_glossary import (
     explain_pipeline_decisions,
     explain_taxonomy,
     explain_trace,
+)
+from choruscontrol.services.assistant_actions import (
+    actions_for_tab_teach,
+    format_actions_kb,
+    match_actions,
 )
 from choruscontrol.services.assistant_knowledge import (
     AGENT_CATALOG,
@@ -338,6 +344,41 @@ async def dashboard_snapshot(state) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             pass
 
+    # End-user client AI chat sessions (Admin — not Ops Assistant)
+    chats_summary: dict[str, Any] = {
+        "count": 0,
+        "raw": 0,
+        "dirty": 0,
+        "compacted": 0,
+        "sessions": [],
+        "tenant_hint": tenant_hint,
+    }
+    try:
+        from choruscontrol.services.client_chats import list_sessions
+
+        sessions = await list_sessions(state.store, limit=40)
+        chats_summary = {
+            "count": len(sessions),
+            "raw": sum(1 for s in sessions if s.get("compact_status") == "raw"),
+            "dirty": sum(1 for s in sessions if s.get("compact_status") == "dirty"),
+            "compacted": sum(1 for s in sessions if s.get("compact_status") == "compacted"),
+            "sessions": [
+                {
+                    "session_id": s["session_id"],
+                    "tenant_id": s.get("tenant_id"),
+                    "title": s.get("title"),
+                    "message_count": s.get("message_count"),
+                    "compact_status": s.get("compact_status"),
+                    "user_ref": s.get("user_ref"),
+                    "last_at": s.get("last_at"),
+                }
+                for s in sessions[:15]
+            ],
+            "tenant_hint": tenant_hint,
+        }
+    except Exception:  # noqa: BLE001
+        pass
+
     # Driver latency (honest —)
     driver: dict[str, Any] = {"p50_ms": None}
     try:
@@ -403,6 +444,7 @@ async def dashboard_snapshot(state) -> dict[str, Any]:
             "latest_run_id": (traces[0]["run_id"] if traces else None),
         },
         "logs": logs_summary,
+        "chats": chats_summary,
         "license": {
             "state": lic,
             "tier": state.license_status.claims.tier if state.license_status.claims else None,
@@ -427,6 +469,178 @@ async def dashboard_snapshot(state) -> dict[str, Any]:
         "platform_brief": PLATFORM_BRIEF.strip(),
         "tenant_hint": tenant_hint,
     }
+
+
+def _client_chat_actions(snap: dict[str, Any], q: str) -> list[dict[str, Any]]:
+    """Gated Admin Client AI chat actions the Ops Assistant can run after confirm."""
+    ch = snap.get("chats") or {}
+    tenant = (
+        ch.get("tenant_hint")
+        or snap.get("tenant_hint")
+        or "default"
+    )
+    sessions = ch.get("sessions") or []
+    out: list[dict[str, Any]] = [
+        {
+            "type": "chats.list",
+            "command": "chats.list",
+            "label": "List client chats",
+            "requires_confirmation": True,
+            "params": {"tenant_id": tenant, "limit": 50},
+        }
+    ]
+    # session id in question
+    sid = None
+    for token in q.replace(",", " ").split():
+        t = token.strip("`\"'")
+        if t.startswith("sess-") or (len(t) >= 8 and "-" in t and "session" in q):
+            sid = t
+            break
+    if not sid and sessions and any(w in q for w in ("open", "show", "get", "detail", "this session")):
+        sid = sessions[0].get("session_id")
+    if sid:
+        out.append(
+            {
+                "type": "chats.get",
+                "command": "chats.get",
+                "label": f"Open {sid[:12]}…",
+                "requires_confirmation": True,
+                "params": {"session_id": sid},
+            }
+        )
+        out.append(
+            {
+                "type": "chats.compact",
+                "command": "chats.compact",
+                "label": f"Compact {sid[:12]}…",
+                "requires_confirmation": True,
+                "params": {"session_id": sid, "prune": True},
+            }
+        )
+    elif any(w in q for w in ("compact", "prune", "shrink")) and not any(
+        w in q for w in ("tenant", "all", "batch")
+    ):
+        # Compact first raw/dirty session if any
+        target = next(
+            (s for s in sessions if s.get("compact_status") in ("raw", "dirty")),
+            sessions[0] if sessions else None,
+        )
+        if target:
+            out.append(
+                {
+                    "type": "chats.compact",
+                    "command": "chats.compact",
+                    "label": f"Compact {str(target.get('session_id'))[:12]}…",
+                    "requires_confirmation": True,
+                    "params": {"session_id": target["session_id"], "prune": True},
+                }
+            )
+    if any(w in q for w in ("tenant", "all", "batch", "raw", "dirty")) or (
+        "compact" in q and "session" not in q
+    ):
+        out.append(
+            {
+                "type": "chats.compact_tenant",
+                "command": "chats.compact_tenant",
+                "label": f"Compact tenant {tenant}",
+                "requires_confirmation": True,
+                "params": {"tenant_id": tenant, "limit": 20},
+            }
+        )
+    elif int(ch.get("raw") or 0) + int(ch.get("dirty") or 0) > 0:
+        out.append(
+            {
+                "type": "chats.compact_tenant",
+                "command": "chats.compact_tenant",
+                "label": f"Compact raw/dirty ({tenant})",
+                "requires_confirmation": True,
+                "params": {"tenant_id": tenant, "limit": 20},
+            }
+        )
+    return out
+
+
+def _cortex_run_actions(snap: dict[str, Any], q: str, focus: str) -> list[dict[str, Any]]:
+    """Gated Cortex tab actions (digest / recall / sleep)."""
+    tenant = snap.get("tenant_hint") or "default"
+    out: list[dict[str, Any]] = []
+    wants_run = any(w in q for w in ("run", "do ", "execute", "please", "confirm", "trigger", "start"))
+    if focus == "digest" or ("digest" in q and wants_run):
+        text = ""
+        if ":" in q:
+            text = q.split(":", 1)[1].strip().strip("\"'")
+        if not text:
+            text = "Ops note: admin requested Cortex digest from Ops Assistant."
+        out.append(
+            {
+                "type": "cortex.digest",
+                "command": "cortex.digest",
+                "label": "Cortex digest",
+                "requires_confirmation": True,
+                "params": {"tenant_id": tenant, "text": text},
+            }
+        )
+    if focus == "recall" or ("recall" in q and wants_run):
+        query = ""
+        if ":" in q:
+            query = q.split(":", 1)[1].strip().strip("\"'")
+        if not query:
+            query = "recent facts"
+        out.append(
+            {
+                "type": "cortex.recall",
+                "command": "cortex.recall",
+                "label": "Cortex recall",
+                "requires_confirmation": True,
+                "params": {"tenant_id": tenant, "query": query},
+            }
+        )
+    if focus == "sleep" or ("sleep" in q and wants_run):
+        out.append(
+            {
+                "type": "cortex.sleep",
+                "command": "cortex.sleep",
+                "label": "Cortex sleep",
+                "requires_confirmation": True,
+                "params": {"tenant_id": tenant},
+            }
+        )
+    # Always offer sleep when teaching sleep; offer digest/recall buttons when teaching those
+    if not out and focus in ("digest", "recall", "sleep", "engine"):
+        if focus in ("digest", "engine"):
+            out.append(
+                {
+                    "type": "cortex.digest",
+                    "command": "cortex.digest",
+                    "label": "Cortex digest",
+                    "requires_confirmation": True,
+                    "params": {
+                        "tenant_id": tenant,
+                        "text": "Ops note: console digest from Ops Assistant teach.",
+                    },
+                }
+            )
+        if focus in ("recall", "engine"):
+            out.append(
+                {
+                    "type": "cortex.recall",
+                    "command": "cortex.recall",
+                    "label": "Cortex recall",
+                    "requires_confirmation": True,
+                    "params": {"tenant_id": tenant, "query": "recent facts"},
+                }
+            )
+        if focus in ("sleep", "engine"):
+            out.append(
+                {
+                    "type": "cortex.sleep",
+                    "command": "cortex.sleep",
+                    "label": "Cortex sleep",
+                    "requires_confirmation": True,
+                    "params": {"tenant_id": tenant},
+                }
+            )
+    return out
 
 
 def explain_score(snap: dict[str, Any], focus: str | None = None) -> str:
@@ -558,6 +772,34 @@ async def assistant_ask(
     def _compose_ops_answer() -> str:
         nonlocal actions
         # --- Intent routing (prefer agent literacy, then dashboard literacy) ---
+        if any(
+            p in q
+            for p in (
+                "what can you do",
+                "what actions",
+                "list actions",
+                "available actions",
+                "what can i run",
+                "actionable catalog",
+                "what can you run",
+            )
+        ):
+            tab = None
+            for t in ("overview", "trace", "taxonomy", "cortex", "guard", "logs", "admin"):
+                if t in q:
+                    tab = t
+                    break
+            if tab:
+                return (
+                    actions_for_tab_teach(tab)
+                    + "\n\nSay one of those prompts and Confirm the button to execute."
+                )
+            return (
+                "I can **teach** any dashboard value and **gated-execute** tab actions "
+                "(Confirm required). Full catalog by tab:\n\n"
+                + format_actions_kb()
+            )
+
         catalog_hit = match_catalog_from_question(q)
         live_hit = find_live_node(nodes, catalog_hit[0] if catalog_hit else None, q)
         role_ask = None
@@ -831,9 +1073,13 @@ async def assistant_ask(
                 "sleep consolidated",
                 "prismcortex",
                 "recall answer",
+                "run cortex",
+                "cortex sleep",
+                "cortex recall",
+                "digest into cortex",
             )
         ) or (
-            "cortex" in q and any(w in q for w in ("what", "explain", "mean", "digest", "sleep", "recall"))
+            "cortex" in q and any(w in q for w in ("what", "explain", "mean", "digest", "sleep", "recall", "run"))
         ):
             focus = "engine"
             if "digest" in q:
@@ -844,7 +1090,40 @@ async def assistant_ask(
                 focus = "recall"
             elif "activity" in q:
                 focus = "activity"
-            return explain_cortex(snap, focus=focus)
+            actions.extend(_cortex_run_actions(snap, q, focus))
+            return (
+                explain_cortex(snap, focus=focus)
+                + "\n\nConfirm a Cortex button below to run digest / recall / sleep (same as `/cortex` tab)."
+            )
+        # End-user Client AI chats (Admin) — teach + gated execute
+        if any(
+            p in q
+            for p in (
+                "client ai chat",
+                "client chat",
+                "end-user chat",
+                "end user chat",
+                "enduser chat",
+                "chat session",
+                "compact client",
+                "list client",
+                "client sessions",
+            )
+        ) or (
+            "chat" in q
+            and any(w in q for w in ("client", "end-user", "end user", "session", "compact", "list", "prune"))
+            and "ops assistant" not in q
+        ):
+            focus = "client_ai_chats"
+            if "compact" in q and ("tenant" in q or "all" in q or "batch" in q or "raw" in q):
+                focus = "chat_compact_tenant"
+            elif "compact" in q or "prune" in q:
+                focus = "chat_compact"
+            actions.extend(_client_chat_actions(snap, q))
+            return (
+                explain_client_chats(snap, focus=focus)
+                + "\n\nConfirm a button below to **list / open / compact** end-user sessions (gated; not Ops Assistant history)."
+            )
         if any(
             p in q
             for p in (
@@ -866,7 +1145,11 @@ async def assistant_ask(
             and any(w in q for w in ("what", "explain", "mean", "why", "missing"))
         ):
             focus = "pin_floors"
-            if "optional" in q or "core" in q:
+            if "client" in q and "chat" in q:
+                focus = "client_ai_chats"
+            elif "end-user" in q or "end user" in q:
+                focus = "client_ai_chats"
+            elif "optional" in q or "core" in q:
                 focus = "core_vs_optional"
             elif "taxonomy_packs" in q or "packs" in q:
                 focus = "taxonomy_packs"
@@ -882,6 +1165,12 @@ async def assistant_ask(
                 focus = "adapters"
             elif "install" in q:
                 focus = "install_hint"
+            if focus in ("client_ai_chats", "chat_compact", "chat_compact_tenant"):
+                actions.extend(_client_chat_actions(snap, q))
+                return (
+                    explain_client_chats(snap, focus=focus)
+                    + "\n\nConfirm a button below to list / open / compact end-user sessions."
+                )
             return explain_doctor(snap, focus=focus)
         if any(
             p in q
@@ -992,7 +1281,8 @@ async def assistant_ask(
             f"{snap['fleet']['online']}/{snap['fleet']['total']} agents online; "
             f"{snap['incidents']['open_count']} incidents). "
             f"Ask about **any number on the dashboard** — scores, Taxonomy engine, pin floors, "
-            f"cascade state, Guard shadow, Cortex digest, Logs filters, or Trace replay.\n\n"
+            f"cascade state, Guard shadow, Cortex digest, Logs filters, Trace replay, "
+            f"or Admin **Client AI chats** (list/open/compact).\n\n"
             f"{explain_overview(snap)}"
         )
 
@@ -1011,6 +1301,15 @@ async def assistant_ask(
     wire = wired.get("wire")
     if wired.get("blocked"):
         actions = []
+    else:
+        # Merge catalog matches (per-tab run prompts) without dropping intent-specific actions
+        matched = match_actions(question, snap)
+        seen = {(a.get("type"), str(a.get("params"))) for a in actions}
+        for a in matched:
+            key = (a.get("type"), str(a.get("params")))
+            if key not in seen:
+                actions.append(a)
+                seen.add(key)
 
     if execute:
         if not confirm:
@@ -1031,7 +1330,19 @@ async def assistant_ask(
                     "command"
                 ) in ("taxonomy.reindex", "taxonomy.warm_partition"):
                     gate_domain = "memory.write"
-                elif etype in ("cascade", "guard.policy.put") or execute.get("type") == "cascade":
+                elif etype in (
+                    "cascade",
+                    "guard.policy.put",
+                    "cortex.digest",
+                    "cortex.sleep",
+                    "cortex.conflict_resolve",
+                    "chats.compact",
+                    "chats.compact_tenant",
+                    "traces.seed",
+                    "fleet.join_token",
+                    "incident.create",
+                    "compliance.scan",
+                ) or execute.get("type") == "cascade":
                     gate_domain = "deployment.approval"
 
                 gate = {"allowed": True}
@@ -1061,6 +1372,22 @@ async def assistant_ask(
                         params.get("tenant_id", "default"), params.get("partition")
                     )
                     execution = {"status": "ok", "job": job.__dict__}
+                elif etype == "taxonomy.search":
+                    from choruscontrol.services.taxonomy_rag import search_term
+
+                    tid = params.get("tenant_id") or "default"
+                    query = params.get("query") or ""
+                    try:
+                        fallback_hits = await state.rag.search(tid, query)
+                        result = search_term(
+                            tid,
+                            query,
+                            top_k=int(params.get("top_k") or 8),
+                            fallback_search=lambda _t, _q: fallback_hits,
+                        )
+                        execution = {"status": "ok", "search": result}
+                    except Exception as exc:  # noqa: BLE001
+                        execution = {"status": "nack", "reason": str(exc)}
                 elif etype == "cascade" or execute.get("type") == "cascade":
                     result = await state.cascade.run(
                         params.get("tenant_id", "default"),
@@ -1082,6 +1409,14 @@ async def assistant_ask(
                     from choruscontrol.services.policy import validate_guard_policy
 
                     pol = params.get("policy") or {}
+                    if "ingress_profile" not in pol:
+                        g = snap.get("guard") or {}
+                        pol = {
+                            "ingress_profile": g.get("ingress_profile") or "web_chat",
+                            "shadow_profile": g.get("shadow_profile") or "light",
+                            "shadow_enabled": bool(g.get("shadow_enabled", True)),
+                            "enforce_shadow": bool(g.get("enforce_shadow")),
+                        }
                     validate_guard_policy(pol)
                     await state.store.execute(
                         "INSERT INTO guard_policies(tenant_id, policy_json, updated_at) VALUES(?,?,?) "
@@ -1095,6 +1430,25 @@ async def assistant_ask(
                     )
                     state.intended_policies[params.get("tenant_id", "default")] = pol
                     execution = {"status": "ok", "policy": pol}
+                elif etype == "guard.shadow_compare":
+                    tid = params.get("tenant_id") or "default"
+                    row = await state.store.fetchone(
+                        "SELECT policy_json FROM guard_policies WHERE tenant_id=?", (tid,)
+                    )
+                    pol = (
+                        json.loads(row["policy_json"])
+                        if row
+                        else state.intended_policies.get("default", {})
+                    )
+                    fn = getattr(state.guard, "shadow_compare", None)
+                    if fn:
+                        out = await fn(
+                            pol.get("ingress_profile", "web_chat"),
+                            pol.get("shadow_profile", "light"),
+                        )
+                    else:
+                        out = {"agree_rate": 0.0, "demo": True}
+                    execution = {"status": "ok", "shadow_compare": out}
                 elif etype == "traces.replay":
                     from choruscontrol.services.traces import replay_trace
 
@@ -1104,11 +1458,231 @@ async def assistant_ask(
                     else:
                         out = await replay_trace(state.store, run_id)
                         execution = {"status": "ok", "replay": out}
+                elif etype == "traces.seed":
+                    from choruscontrol.services.traces import seed_demo_trace
+
+                    run_id = await seed_demo_trace(
+                        state.store, tenant_id=params.get("tenant_id") or "default"
+                    )
+                    execution = {"status": "ok", "seed": {"run_id": run_id}}
                 elif etype == "compliance.scan":
                     from choruscontrol.services.compliance import run_compliance_scan
 
                     out = await run_compliance_scan(state)
                     execution = {"status": "ok", "compliance": out}
+                elif etype == "logs.search":
+                    if state.ops_logs is None:
+                        execution = {"status": "nack", "reason": "ops logs unavailable"}
+                    else:
+                        entries = await state.ops_logs.search(
+                            q=params.get("q") or None,
+                            source=params.get("source"),
+                            level=params.get("level"),
+                            tenant_id=params.get("tenant_id"),
+                            node_id=params.get("node_id"),
+                            limit=int(params.get("limit") or 50),
+                        )
+                        execution = {
+                            "status": "ok",
+                            "logs": {"entries": entries, "count": len(entries)},
+                        }
+                elif etype == "graph.blast_radius":
+                    from choruscontrol.services.graph import blast_radius
+
+                    aid = params.get("asset_id")
+                    if not aid:
+                        execution = {"status": "nack", "reason": "asset_id required"}
+                    else:
+                        out = await blast_radius(state.store, aid)
+                        execution = {"status": "ok", "blast_radius": out}
+                elif etype == "fleet.join_token":
+                    token = await state.fleet.create_join_token(
+                        max_uses=int(params.get("max_uses") or 10),
+                        ttl_seconds=int(params.get("ttl_seconds") or 3600),
+                    )
+                    execution = {"status": "ok", "join_token": token}
+                elif etype == "admin.doctor":
+                    from choruscontrol.services.doctor import doctor_mother
+
+                    doc = await doctor_mother(state)
+                    execution = {"status": "ok", "doctor": doc}
+                elif etype == "admin.license_online_check":
+                    try:
+                        check = await state.run_license_online_check(force=True)
+                        execution = {"status": "ok", "check": check}
+                    except Exception as exc:  # noqa: BLE001
+                        execution = {
+                            "status": "ok",
+                            "check": {"enabled": False, "reason": str(exc), "demo": True},
+                        }
+                elif etype == "chats.list":
+                    from choruscontrol.services.client_chats import list_sessions
+
+                    sessions = await list_sessions(
+                        state.store,
+                        tenant_id=params.get("tenant_id"),
+                        limit=int(params.get("limit") or 50),
+                        compact_status=params.get("compact_status"),
+                    )
+                    execution = {"status": "ok", "sessions": sessions, "count": len(sessions)}
+                elif etype == "chats.get":
+                    from choruscontrol.services.client_chats import get_session
+
+                    sid = params.get("session_id")
+                    if not sid:
+                        execution = {"status": "nack", "reason": "session_id required"}
+                    else:
+                        detail = await get_session(state.store, sid)
+                        if not detail:
+                            execution = {"status": "nack", "reason": "session not found"}
+                        else:
+                            execution = {"status": "ok", "session": detail}
+                elif etype == "chats.compact":
+                    from choruscontrol.services.client_chats import compact_session
+
+                    sid = params.get("session_id")
+                    if not sid:
+                        execution = {"status": "nack", "reason": "session_id required"}
+                    else:
+                        try:
+                            result = await compact_session(
+                                state.store, sid, prune=bool(params.get("prune", True))
+                            )
+                            execution = {"status": "ok", "compact": result}
+                        except KeyError:
+                            execution = {"status": "nack", "reason": "session not found"}
+                elif etype == "chats.compact_tenant":
+                    from choruscontrol.services.client_chats import compact_tenant
+
+                    result = await compact_tenant(
+                        state.store,
+                        params.get("tenant_id") or "default",
+                        limit=int(params.get("limit") or 20),
+                    )
+                    execution = {"status": "ok", "compact_tenant": result}
+                elif etype == "cortex.digest":
+                    from choruscontrol.services.cortex_ops import digest, prismcortex_available
+
+                    text = (params.get("text") or "").strip()
+                    if not text:
+                        execution = {"status": "nack", "reason": "text required"}
+                    elif not prismcortex_available():
+                        execution = {
+                            "status": "ok",
+                            "digest": {
+                                "ok": False,
+                                "outcome": "skipped",
+                                "reason": "prismcortex not installed",
+                                "demo": True,
+                            },
+                        }
+                    else:
+                        try:
+                            result = digest(
+                                params.get("tenant_id") or "default",
+                                text,
+                                agent_id="ops-assistant",
+                            )
+                            execution = {"status": "ok", "digest": result}
+                        except Exception as exc:  # noqa: BLE001
+                            execution = {"status": "nack", "reason": str(exc)}
+                elif etype == "cortex.recall":
+                    from choruscontrol.services.cortex_ops import prismcortex_available, recall
+
+                    query = (params.get("query") or "").strip()
+                    if not query:
+                        execution = {"status": "nack", "reason": "query required"}
+                    elif not prismcortex_available():
+                        execution = {
+                            "status": "ok",
+                            "recall": {
+                                "ok": False,
+                                "answer": None,
+                                "reason": "prismcortex not installed",
+                                "demo": True,
+                            },
+                        }
+                    else:
+                        try:
+                            result = recall(params.get("tenant_id") or "default", query)
+                            execution = {"status": "ok", "recall": result}
+                        except Exception as exc:  # noqa: BLE001
+                            execution = {"status": "nack", "reason": str(exc)}
+                elif etype == "cortex.explain":
+                    from choruscontrol.services.cortex_ops import explain, prismcortex_available
+
+                    query = (params.get("query") or "").strip()
+                    if not query:
+                        execution = {"status": "nack", "reason": "query required"}
+                    elif not prismcortex_available():
+                        execution = {
+                            "status": "ok",
+                            "explain": {"ok": False, "reason": "prismcortex not installed", "demo": True},
+                        }
+                    else:
+                        try:
+                            result = explain(params.get("tenant_id") or "default", query)
+                            execution = {"status": "ok", "explain": result}
+                        except Exception as exc:  # noqa: BLE001
+                            execution = {"status": "nack", "reason": str(exc)}
+                elif etype == "cortex.sleep":
+                    from choruscontrol.services.cortex_ops import prismcortex_available, sleep_tenant
+
+                    if not prismcortex_available():
+                        execution = {
+                            "status": "ok",
+                            "sleep": {
+                                "ok": False,
+                                "outcome": "skipped",
+                                "reason": "prismcortex not installed",
+                                "demo": True,
+                            },
+                        }
+                    else:
+                        try:
+                            result = sleep_tenant(params.get("tenant_id") or "default")
+                            job = await state.jobs.trigger_sleep(
+                                params.get("tenant_id") or "default"
+                            )
+                            execution = {"status": "ok", "sleep": result, "job_id": job.job_id}
+                        except Exception as exc:  # noqa: BLE001
+                            execution = {"status": "nack", "reason": str(exc)}
+                elif etype == "cortex.conflict_resolve":
+                    from choruscontrol.services.cortex_ops import (
+                        prismcortex_available,
+                        resolve_conflict as cx_resolve,
+                    )
+
+                    subject = params.get("subject") or params.get("conflict_id")
+                    relation = params.get("relation") or "is"
+                    chosen = params.get("chosen_value") or params.get("resolution") or "keep_new"
+                    if not subject:
+                        execution = {"status": "nack", "reason": "subject/conflict_id required"}
+                    elif not prismcortex_available():
+                        execution = {
+                            "status": "ok",
+                            "resolve": {
+                                "ok": False,
+                                "reason": "prismcortex not installed",
+                                "demo": True,
+                            },
+                        }
+                    else:
+                        try:
+                            result = cx_resolve(
+                                params.get("tenant_id") or "default",
+                                str(subject),
+                                str(relation),
+                                str(chosen),
+                            )
+                            cascade = await state.cascade.run(
+                                params.get("tenant_id") or "default",
+                                [f"cortex:conflict:{subject}"],
+                                reason="cortex_conflict_resolve",
+                            )
+                            execution = {"status": "ok", "resolve": result, "cascade": cascade}
+                        except Exception as exc:  # noqa: BLE001
+                            execution = {"status": "nack", "reason": str(exc)}
                 else:
                     execution = {"status": "nack", "reason": f"unsupported execute {execute}"}
                 await state.audit.log_action(

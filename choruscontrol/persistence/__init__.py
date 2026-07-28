@@ -190,6 +190,38 @@ CREATE TABLE IF NOT EXISTS ops_logs (
 CREATE INDEX IF NOT EXISTS ops_logs_ts ON ops_logs(ts DESC);
 CREATE INDEX IF NOT EXISTS ops_logs_source_ts ON ops_logs(source, ts DESC);
 CREATE INDEX IF NOT EXISTS ops_logs_tenant_ts ON ops_logs(tenant_id, ts DESC);
+
+CREATE TABLE IF NOT EXISTS client_chat_sessions (
+  session_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  node_id TEXT,
+  user_ref TEXT,
+  channel TEXT NOT NULL DEFAULT 'end_user',
+  title TEXT,
+  message_count INTEGER NOT NULL DEFAULT 0,
+  started_at REAL NOT NULL,
+  last_at REAL NOT NULL,
+  compact_status TEXT NOT NULL DEFAULT 'raw',
+  summary TEXT,
+  cortex_digest_ref TEXT,
+  meta_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS client_chat_sessions_tenant_last
+  ON client_chat_sessions(tenant_id, last_at DESC);
+
+CREATE TABLE IF NOT EXISTS client_chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id TEXT NOT NULL UNIQUE,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  ts REAL NOT NULL,
+  pruned INTEGER NOT NULL DEFAULT 0,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  FOREIGN KEY(session_id) REFERENCES client_chat_sessions(session_id)
+);
+CREATE INDEX IF NOT EXISTS client_chat_messages_session_ts
+  ON client_chat_messages(session_id, ts ASC);
 """
 
 

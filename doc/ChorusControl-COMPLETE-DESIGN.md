@@ -6,8 +6,8 @@
 | Product | **ChorusControl — Enterprise AI Operating System** |
 | Subtitle | AI Operations Platform for Enterprise AI |
 | Document | **Complete Design — single file** |
-| Version | 1.7.0 |
-| Status | Design complete — implementation not started |
+| Version | **1.8.1** |
+| Status | Design complete — Side 2 implemented (see Implementation Plan) |
 | Date | July 2026 |
 | Relates to | *ChorusControl Architecture & Design Spec* PDF v1.0.0 |
 | Repo | Side 2 main product. Side 1 = future www.insightits.com handoff |
@@ -38,8 +38,8 @@
 | Product | **ChorusControl — Enterprise AI Operating System** |
 | Subtitle | AI Operations Platform for Enterprise AI |
 | Portal | www.insightits.com (Side 1 — future handoff) |
-| Design version | 1.7.0 |
-| Status | Design complete — implementation not started |
+| Design version | 1.8.1 |
+| Status | Design complete — Side 2 implemented |
 | Date | July 2026 |
 
 **Canonical full text:** [ChorusControl-COMPLETE-DESIGN.md](./ChorusControl-COMPLETE-DESIGN.md)
@@ -58,7 +58,7 @@
 
 ### System picture
 
-Mother (`choruscontrol[server]`) + fleet agents (`choruscontrol[agent]`) over Fabric/PrismAPI; zero hot-path latency; offline license; Side 1 issues keys later.
+Mother (`choruscontrol[server]`) + fleet agents (`choruscontrol[agent]`) over HTTP (Fabric optional); zero hot-path latency; offline license; Side 1 issues keys later.
 
 ---
 
@@ -70,12 +70,14 @@ Governance · Observability · Security · Operations · Intelligence · Ecosyst
 
 | Capability | Phase |
 |------------|-------|
-| Mother + agent + six tabs + cascade/caps | 1–2 |
+| Mother + agent + tabs + cascade/caps | 1–2 |
 | **Enterprise AI Asset Graph** | 3 |
 | Incident / version / policy engine | 4–5 |
 | **AI Score** + predictive | 5 |
 | Exec + Eng experiences | 4–5 |
-| **AI Operations Assistant** | 6 |
+| **AI Operations Assistant** (literacy + gated execute) | 6 |
+| **Client AI chat history** + PrismCortex compact | §3.7.4a |
+| Ops Logs | `/logs` |
 
 ---
 
@@ -97,7 +99,7 @@ Manage an intelligent AI organization like cloud infrastructure — observable, 
 
 ---
 
-*Insight IT Solutions LLC — ChorusControl Design Overview v1.7.0*
+*Insight IT Solutions LLC — ChorusControl Design Overview v1.8.1*
 
 
 # Part B — Normative Architecture (Gaps & Solutions)
@@ -108,7 +110,7 @@ Manage an intelligent AI organization like cloud infrastructure — observable, 
 | Product | **ChorusControl — Enterprise AI Operating System** (AI Operations Platform) |
 | Technical role | Self-hosted mother + fleet agent architecture for Prism / Chorus |
 | Document | Design Gaps Analysis & Resolved Architecture |
-| Version | 1.7.0 |
+| Version | 1.8.0 |
 | Status | Approved for implementation |
 | Date | July 2026 |
 | Relates to | *ChorusControl Architecture & Design Spec* v1.0.0 |
@@ -451,9 +453,10 @@ Honesty banners required in UI:
 | Trace | `/trace` | live wire WS, ledger, **Guard→Ledger→Shine** stitch, zero-token replay |
 | Taxonomy | `/taxonomy` | 64-d search, category tree, chunk health, reindex, **partition/warm ops** |
 | Memory | `/memory` | bitemporal facts, sleep, conflicts, **cascade on resolve**, explain/recall_at proxy |
-| Cortex | `/cortex` | PrismCortex activity, chunks, digest/recall/sleep; R04 `memory_endpoint` |
+| Cortex | `/cortex` | PrismCortex activity, chunks, digest/recall/sleep; R04 `memory_endpoint`; Ops Assistant can gated-execute the same |
 | Guard | `/guard` | logs, shadow compare, lexicon, **Policy Studio** |
-| Admin | `/admin` | ChorusControl license, **stack license status**, tenants, audit/export, RBAC, support link, doctor snapshot |
+| Logs | `/logs` | Unified ops log bus (audit/fleet/ledger/cascade/agent); search + live WS |
+| Admin | `/admin` | License, stack licenses, tenants, doctor, compliance, **Client AI chats** (end-user sessions + PrismCortex compact), audit/export, RBAC |
 
 ---
 
@@ -552,6 +555,61 @@ Tenant → memory addressing: fleet registry `memory_endpoint` (agent advertises
 
 Prefer Cortex HTTP enterprise surfaces (`/conflicts`, `/explain`, `/recall_at`, replay certificate) via adapter — ChorusControl adds RBAC, audit, and cascade, **not** a second graph store.
 
+##### 3.7.4a End-user client AI chat history (Admin)
+
+**Requirement:** Admins must browse **end-user / client** AI conversations that apps and fleet agents produce — **not** the Ops Assistant drawer on the mother console. Sessions are grouped; long-term storage shrinks by digesting summaries into **PrismCortex** and pruning raw message bodies.
+
+**Non-goals:** Hot-path inference; reimplementing a chat UI for customers; storing Ops Assistant turns in this store.
+
+###### Data model (SQLite)
+
+| Table | Purpose |
+|-------|---------|
+| `client_chat_sessions` | Session index: `session_id`, `tenant_id`, `node_id`, `user_ref`, `channel`, `title`, `message_count`, `started_at`, `last_at`, `compact_status`, `summary`, `cortex_digest_ref`, `meta_json` |
+| `client_chat_messages` | Turns: `message_id`, `session_id`, `role`, `content`, `ts`, `pruned`, `meta_json` |
+
+###### Compact status
+
+| Status | Meaning |
+|--------|---------|
+| `raw` | Full message bodies on disk |
+| `dirty` | Was compacted; new turns arrived |
+| `compacted` | Summary + `cortex_digest_ref`; bodies pruned to `[pruned]` |
+
+###### APIs
+
+| API | Auth | Behavior |
+|-----|------|----------|
+| `POST /chats/ingest` | operator | Upsert session + append turns (bounded) |
+| `POST /fleet/chat-batch` | node session (`X-Node-Session`) | Agent push of end-user turns |
+| `GET /chats/sessions` | viewer+ | List (filters: `tenant_id`, `compact_status`, `limit`) |
+| `GET /chats/sessions/{id}` | viewer+ | Detail + messages (`include_pruned` optional) |
+| `POST /chats/sessions/{id}/compact` | operator | Summarize → PrismCortex `digest()` when installed → prune bodies |
+| `POST /chats/compact-tenant` | operator | Batch compact `raw`/`dirty` for a tenant |
+
+Without PrismCortex installed: compact still writes SQLite `summary`, sets `compacted`, prunes bodies; cortex outcome is honest skip/demo.
+
+###### Admin UI
+
+**Client AI chats** section on `/admin`: refresh list · open session detail · compact one · compact raw/dirty for tenant. Deep-link literacy via Ops Assistant chips.
+
+###### Ops Assistant (teach + gated execute)
+
+Must teach: distinction from Ops Assistant, status meanings, when to compact, live counts from `dashboard_snapshot.chats`.
+
+Must propose Confirm buttons that call the same services as the Admin UI (feature `assistant.ops` when not demo; audit `assistant.execute`):
+
+| Action `type` | Behavior |
+|---------------|----------|
+| `chats.list` | List sessions |
+| `chats.get` | Open one session |
+| `chats.compact` | Compact one session |
+| `chats.compact_tenant` | Batch compact |
+
+Detail: [Client-Chats.md](./Client-Chats.md) · Ops literacy: [Ops-Assistant.md](./Ops-Assistant.md).
+
+Hot path stays out-of-band — this is ops storage + recall, not inference.
+
 ---
 
 ##### 3.7.5 Security WAF `/guard` — Policy Studio (closes G15)
@@ -597,10 +655,10 @@ Never invent `finance_pilot` / `healthcare_pilot` — always `domain_pilot` + `d
 
 ---
 
-##### 3.7.6 Admin & License `/admin` (ties to §3.16, §3.18)
+##### 3.7.6 Admin & License `/admin` (ties to §3.16, §3.18, §3.7.4a)
 
-| API | Behavior |
-|-----|----------|
+| API / surface | Behavior |
+|---------------|----------|
 | License upload/status | ChorusControl key only (verify) |
 | `GET /admin/stack-licenses` | Sibling key status (§3.16) |
 | Tenant isolation matrix | CRUD within `max_tenants` |
@@ -608,6 +666,7 @@ Never invent `finance_pilot` / `healthcare_pilot` — always `domain_pilot` + `d
 | RBAC management | §3.3 |
 | Support deep link | Side 1 URL |
 | `GET /admin/doctor` | Snapshot from §3.17 |
+| **Client AI chats** | §3.7.4a — list / open / compact end-user sessions; PrismCortex compact |
 
 ---
 
@@ -1510,9 +1569,25 @@ Organization → Project → Agent/Node
 
 Native assistant with Asset Graph + subsystem visibility. Primary ops interface for admins/devs/execs **alongside** dashboards (never a replacement).
 
-Example asks: Why did Finance Agent fail? Prompt-changing deployments? Noisiest policies? Costliest systems? Explain incident. Compare deploy 42 vs 41. Stale knowledge? Upgrade Marketing agents. Compliance report. Review architecture.
+**Dashboard literacy (required):** Teach **every primary tab value** in plain English from live `dashboard_snapshot` telemetry — Overview scores/layers, Trace wire/replay, Taxonomy engine/partitions/staleness, Cortex digest/recall/sleep, Guard shadow/profiles, Ops Logs filters, Admin doctor/pins/license/**Client AI chats**. Glossaries in `assistant_glossary.py`. See [Ops-Assistant.md](./Ops-Assistant.md).
 
-**Gated execution:** rollback, model upgrade, rebuild indexes, assign policies, reports, open incidents, trigger evals — via same APIs as UI, RBAC + audit + confirm destructive ops. Feature `assistant.ops`. Ground in graph + telemetry; no invented world-truth.
+Example asks: Why did Finance Agent fail? Why is Performance 0? What does cascade completed mean? What are Client AI chats? Compact raw client sessions. Run cortex sleep. Explain pin floors. Stale knowledge? Compliance report.
+
+**Gated execution:** Same APIs as UI, RBAC + audit + Confirm for mutations. Feature `assistant.ops` (demo may label). No invented world-truth.
+
+**Actionable catalog (agent KB):** Every primary tab’s run prompts → `execute.type` live in `choruscontrol/services/assistant_actions.py` and [Ops-Assistant-Actions.md](./Ops-Assistant-Actions.md). Ask “What can you do on {tab}?” for the short list. `match_actions(question, snap)` proposes Confirm buttons; handlers call the same services as tab buttons.
+
+| Domain | Execute `type` (examples) |
+|--------|---------------------------|
+| Overview | `cascade`, `incident.create`, `graph.blast_radius`, `compliance.scan` |
+| Trace | `traces.seed`, `traces.replay` |
+| Taxonomy | `taxonomy.reindex`, `taxonomy.warm_partition`, `taxonomy.search` |
+| Cortex | `cortex.digest`, `cortex.recall`, `cortex.explain`, `cortex.sleep`, `cortex.conflict_resolve` |
+| Guard | `guard.shadow_compare`, `guard.policy.put` |
+| Logs | `logs.search` |
+| Admin / Client chats (§3.7.4a) | `fleet.join_token`, `admin.doctor`, `admin.license_online_check`, `chats.list`, `chats.get`, `chats.compact`, `chats.compact_tenant`, `compliance.scan` |
+
+**Phase 6 rule:** Assistant executes only via existing RBAC + audit + confirmation for destructive actions.
 
 #### 11.7 Executive vs engineering experience
 
@@ -1564,7 +1639,7 @@ Manage an **intelligent AI organization**, not isolated agents. Trusted layer fo
 
 ---
 
-*End of document — Insight IT Solutions LLC / ChorusControl Design Gaps & Solutions v1.7.0 — Enterprise AI Operating System*
+*End of document — Insight IT Solutions LLC / ChorusControl Design Gaps & Solutions v1.8.0 — Enterprise AI Operating System*
 
 
 # Part C — Side 1 Handoff (www.insightits.com)
@@ -1711,7 +1786,7 @@ The ChorusControl repo will ship:
 | Field | Value |
 |-------|-------|
 | Status | **Side 2 shippable** — see [ChorusControl-Shipping-Gaps.md](./ChorusControl-Shipping-Gaps.md) |
-| Design baseline | Gaps & Solutions v1.7.0 · Enterprise AI Operating System |
+| Design baseline | Gaps & Solutions v1.8.0 · Enterprise AI Operating System |
 | Date | July 2026 |
 
 Design gaps G01–G21 and upgrades U1–U23 are **resolved on paper**. Shipping:
@@ -2090,7 +2165,9 @@ Side 2 is “ready to sell beside the stack” when:
 | 1.5.0 | 2026-07-26 | Single-file merge |
 | 1.6.0 | 2026-07-26 | AI Operations Platform + Implementation Strategy |
 | 1.7.0 | 2026-07-26 | Enterprise AI OS vision; Asset Graph; Ops Assistant; pillars; lifecycle; U20–U23 |
+| 1.8.0 | 2026-07-28 | §3.7.4a Client AI chats + PrismCortex compact; Logs tab; Ops Assistant literacy + gated execute for chats.* and cortex.* |
+| 1.8.1 | 2026-07-28 | Per-tab Ops Assistant actionable catalog (KB + `assistant_actions.py`); all primary tab run prompts → gated execute |
 
 **Canonical file:** `ChorusControl-COMPLETE-DESIGN.md`.
 
-*Insight IT Solutions LLC — ChorusControl Complete Design Specification v1.7.0 — Enterprise AI Operating System*
+*Insight IT Solutions LLC — ChorusControl Complete Design Specification v1.8.1 — Enterprise AI Operating System*
