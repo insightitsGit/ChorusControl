@@ -16,6 +16,7 @@ from choruscontrol.license import LicenseStatus, LicenseVerifier
 from choruscontrol.license.store import resolve_license_key
 from choruscontrol.persistence import Store
 from choruscontrol.services.metrics import MetricsSampler
+from choruscontrol.services.ops_logs import OpsLogBus
 from choruscontrol.services.tenants import ensure_default_tenant
 
 log = logging.getLogger("choruscontrol.app_state")
@@ -38,6 +39,7 @@ class AppState:
     cortex: Any
     graph: Any
     rag: Any
+    ops_logs: OpsLogBus | None = None
     adapter_sources: dict[str, str] = field(default_factory=dict)
     adapter_pins: dict[str, Any] = field(default_factory=dict)
     pending_commands: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -76,6 +78,20 @@ class AppState:
         for ws in dead:
             if ws in self.fleet_subscribers:
                 self.fleet_subscribers.remove(ws)
+        if self.ops_logs is not None:
+            et = event.get("type") or "event"
+            node = event.get("node_id")
+            try:
+                await self.ops_logs.emit(
+                    source="fleet",
+                    level="info",
+                    node_id=str(node) if node else None,
+                    message=f"fleet.{et}" + (f" node={node}" if node else ""),
+                    fields={k: v for k, v in event.items() if k != "body"}
+                    | ({"ack_status": (event.get("body") or {}).get("status")} if event.get("body") else {}),
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("ops_logs fleet emit failed: %s", exc)
 
 
 async def build_state(settings: Settings) -> AppState:
@@ -217,6 +233,27 @@ async def build_state(settings: Settings) -> AppState:
             "CHORUSCONTROL_ALLOW_INSECURE_EXTERNAL=1 — external-zone agents may join over plaintext HTTP"
         )
 
+    ops_logs = OpsLogBus(store)
+
+    async def _audit_to_ops(envelope: dict[str, Any]) -> None:
+        details = envelope.get("details")
+        if not isinstance(details, dict):
+            details = {"value": details}
+        await ops_logs.emit(
+            source="audit",
+            level="info",
+            tenant_id=str(envelope.get("tenant_id") or "") or None,
+            message=f"{envelope.get('action')} by {envelope.get('admin_user')}",
+            fields={
+                "event_id": envelope.get("event_id"),
+                "action": envelope.get("action"),
+                "admin_user": envelope.get("admin_user"),
+                "details": details,
+            },
+        )
+
+    audit.on_action = _audit_to_ops
+
     state = AppState(
         settings=settings,
         store=store,
@@ -233,6 +270,7 @@ async def build_state(settings: Settings) -> AppState:
         cortex=cortex,
         graph=graph,
         rag=rag,
+        ops_logs=ops_logs,
         adapter_sources=bundle.sources,
         adapter_pins=bundle.pins,
         intended_policies={"default": default_policy},
@@ -240,6 +278,17 @@ async def build_state(settings: Settings) -> AppState:
     )
     if postgres is not None:
         store.postgres = postgres  # type: ignore[attr-defined]
+
+    await ops_logs.emit(
+        source="system",
+        level="info",
+        message="mother online",
+        fields={
+            "demo_mode": settings.demo_mode,
+            "adapters": bundle.sources,
+            "license": status.state,
+        },
+    )
 
     def _compliance_sync(tenant_id: str, params: dict[str, Any]) -> None:
         import asyncio

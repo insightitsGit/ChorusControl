@@ -32,6 +32,7 @@ from choruscontrol.services.incidents import (
     link_cascade_incident,
     update_incident_state,
 )
+from choruscontrol.services.ops_logs import KNOWN_SOURCES, emit_ops
 from choruscontrol.services.pipelines import live_pipelines
 from choruscontrol.services.policy import PolicyValidationError, shadow_promote_checklist, validate_guard_policy
 from choruscontrol.services.tenants import create_tenant, delete_tenant, list_tenants
@@ -150,6 +151,12 @@ class LedgerBatchBody(BaseModel):
     run_ids: list[str] = Field(default_factory=list)
     entries: list[dict[str, Any]]
     truncated: bool = False
+
+
+class FleetLogsBatchBody(BaseModel):
+    node_id: str
+    tenant_id: str = "default"
+    entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class LexiconBody(BaseModel):
@@ -535,6 +542,26 @@ async def ledger_batch(
                 await ws.send_json(entry)
             except Exception:  # noqa: BLE001
                 pass
+        if important:
+            await emit_ops(
+                s,
+                source="ledger",
+                level="warn" if decision in ("block", "flag", "error") else "info",
+                tenant_id=body.tenant_id,
+                node_id=body.node_id,
+                run_id=entry.get("run_id") or (body.run_ids[0] if body.run_ids else None),
+                message=f"ledger {stage or 'stage'}:{decision or 'ok'}",
+                fields={"stage": stage, "decision": decision, "entry": entry},
+            )
+    await emit_ops(
+        s,
+        source="ledger",
+        level="info",
+        tenant_id=body.tenant_id,
+        node_id=body.node_id,
+        message=f"ledger-batch kept={kept} received={len(body.entries)}",
+        fields={"kept": kept, "received": len(body.entries), "truncated": body.truncated},
+    )
     return {"kept": kept, "truncated": body.truncated}
 
 
@@ -590,6 +617,15 @@ async def run_cascade(body: CascadeBody, request: Request, principal=require_rol
     if row:
         await link_cascade_incident(s.store, {"cascade_id": row["cascade_id"], **result}, body.tenant_id)
     await s.audit.log_action(principal.user, "correction_cascade", body.tenant_id, result)
+    await emit_ops(
+        s,
+        source="cascade",
+        level="info" if result.get("state") != "failed" else "error",
+        tenant_id=body.tenant_id,
+        run_id=result.get("cascade_id"),
+        message=f"cascade {result.get('state')} tags={len(body.tags)}",
+        fields=result,
+    )
     return result
 
 
@@ -1614,6 +1650,107 @@ async def traces_seed(request: Request, principal=require_role("operator")):
     run_id = await seed_demo_trace(state(request).store, body.get("tenant_id", "default"))
     await state(request).audit.log_action(principal.user, "trace.seed", "default", {"run_id": run_id})
     return {"run_id": run_id}
+
+
+# --- Ops logs (search + realtime) ---
+
+
+@router.get("/logs")
+async def logs_search(
+    request: Request,
+    q: str | None = None,
+    source: str | None = None,
+    level: str | None = None,
+    tenant_id: str | None = None,
+    node_id: str | None = None,
+    since: float | None = None,
+    limit: int = 100,
+    _=require_role("viewer"),
+):
+    s = state(request)
+    if s.ops_logs is None:
+        return {"entries": [], "sources": sorted(KNOWN_SOURCES)}
+    entries = await s.ops_logs.search(
+        q=q,
+        source=source,
+        level=level,
+        tenant_id=tenant_id,
+        node_id=node_id,
+        since=since,
+        limit=limit,
+    )
+    return {"entries": entries, "sources": sorted(KNOWN_SOURCES), "count": len(entries)}
+
+
+@router.post("/fleet/logs-batch")
+async def fleet_logs_batch(
+    body: FleetLogsBatchBody, request: Request, x_node_session: str | None = Header(default=None)
+):
+    """Agent push of local ops lines into mother log bus."""
+    s = state(request)
+    try:
+        await s.fleet.require_session(body.node_id, x_node_session)
+    except ValueError as exc:
+        raise HTTPException(401, detail=str(exc)) from exc
+    accepted = 0
+    for raw in body.entries[:200]:
+        if not isinstance(raw, dict):
+            continue
+        msg = str(raw.get("message") or raw.get("msg") or "").strip()
+        if not msg:
+            continue
+        await emit_ops(
+            s,
+            source=str(raw.get("source") or "agent"),
+            level=str(raw.get("level") or "info"),
+            tenant_id=body.tenant_id or raw.get("tenant_id"),
+            node_id=body.node_id,
+            run_id=raw.get("run_id"),
+            message=msg,
+            fields={k: v for k, v in raw.items() if k not in ("message", "msg", "level", "source")},
+        )
+        accepted += 1
+    return {"accepted": accepted}
+
+
+@router.websocket("/logs/live")
+async def logs_live(websocket: WebSocket):
+    """Viewer+ bearer required (query ?token= or Authorization). Realtime ops log fan-out."""
+    from choruscontrol.auth.rbac import ROLE_RANK, parse_bearer
+
+    app = websocket.app
+    cc = getattr(app.state, "cc", None)
+    if cc is None or cc.ops_logs is None:
+        await websocket.close(code=1011)
+        return
+    auth = websocket.headers.get("authorization") or ""
+    token = websocket.query_params.get("token") or ""
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip() or token
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        principal = parse_bearer(f"Bearer {token}", cc.settings.admin_token)
+        if ROLE_RANK.get(principal.role, 0) < ROLE_RANK["viewer"]:
+            await websocket.close(code=4403)
+            return
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    cc.ops_logs.subscribers.append(websocket)
+    try:
+        recent = await cc.ops_logs.search(limit=50)
+        await websocket.send_json({"type": "snapshot", "entries": list(reversed(recent))})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in cc.ops_logs.subscribers:
+            cc.ops_logs.subscribers.remove(websocket)
 
 
 @router.websocket("/fleet/live")

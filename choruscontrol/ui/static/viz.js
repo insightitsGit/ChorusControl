@@ -138,7 +138,12 @@
       const status = n.status || "idle";
       const fill =
         status === "ok" ? C.ok : status === "bad" ? C.bad : status === "active" ? C.active : C.idle;
-      const g = el("g", { class: "viz-node", style: `cursor:pointer`, "data-id": n.id });
+      const selectable = typeof opts.onSelect === "function";
+      const g = el("g", {
+        class: "viz-node" + (selectable ? " is-interactive" : ""),
+        style: selectable ? "cursor:pointer" : "cursor:default",
+        "data-id": n.id || "",
+      });
       g.appendChild(
         el("circle", { cx: n.x, cy: n.y, r: "18", fill: C.paper, stroke: fill, "stroke-width": "3" })
       );
@@ -177,11 +182,13 @@
           )
         );
       }
-      g.addEventListener("click", () => {
-        opts.onSelect?.(n, i);
-        container.querySelectorAll(".viz-node").forEach((x) => x.classList.remove("is-selected"));
-        g.classList.add("is-selected");
-      });
+      if (selectable) {
+        g.addEventListener("click", () => {
+          opts.onSelect(n, i);
+          container.querySelectorAll(".viz-node").forEach((x) => x.classList.remove("is-selected"));
+          g.classList.add("is-selected");
+        });
+      }
       svg.appendChild(g);
     });
 
@@ -224,8 +231,13 @@
       })
     );
 
-    // mother hub
-    svg.appendChild(
+    // mother hub — clickable when onSelectMother provided
+    const motherSelectable = typeof opts.onSelectMother === "function";
+    const motherG = el("g", {
+      class: "viz-node" + (motherSelectable ? " is-interactive" : ""),
+      style: motherSelectable ? "cursor:pointer" : "cursor:default",
+    });
+    motherG.appendChild(
       el("circle", {
         cx: hx,
         cy: hy,
@@ -236,13 +248,17 @@
         filter: `url(#${glowId})`,
       })
     );
-    svg.appendChild(
+    motherG.appendChild(
       el(
         "text",
         { x: hx, y: hy + 4, "text-anchor": "middle", fill: C.active, "font-size": "11", "font-weight": "700" },
         ["Mother"]
       )
     );
+    if (motherSelectable) {
+      motherG.addEventListener("click", () => opts.onSelectMother({ kind: "mother", label: "Mother" }));
+    }
+    svg.appendChild(motherG);
 
     if (!items.length) {
       svg.appendChild(
@@ -280,7 +296,11 @@
         });
       }
 
-      const g = el("g", { class: "viz-node", style: "cursor:pointer" });
+      const selectable = typeof opts.onSelect === "function";
+      const g = el("g", {
+        class: "viz-node" + (selectable ? " is-interactive" : ""),
+        style: selectable ? "cursor:pointer" : "cursor:default",
+      });
       g.appendChild(
         el("circle", { cx: x, cy: y, r: "16", fill: C.paper, stroke: color, "stroke-width": "2.5" })
       );
@@ -297,7 +317,7 @@
           n.role || "worker",
         ])
       );
-      g.addEventListener("click", () => opts.onSelect?.(n));
+      if (selectable) g.addEventListener("click", () => opts.onSelect(n));
       svg.appendChild(g);
     });
 
@@ -353,7 +373,11 @@
     });
 
     Object.values(pos).forEach((n) => {
-      const g = el("g", { class: "viz-node", style: "cursor:pointer" });
+      const selectable = typeof opts.onSelect === "function";
+      const g = el("g", {
+        class: "viz-node" + (selectable ? " is-interactive" : ""),
+        style: selectable ? "cursor:pointer" : "cursor:default",
+      });
       const fill =
         n.kind === "organization"
           ? C.active
@@ -368,7 +392,7 @@
           String(n.label).slice(0, 18),
         ])
       );
-      g.addEventListener("click", () => opts.onSelect?.(n));
+      if (selectable) g.addEventListener("click", () => opts.onSelect(n));
       svg.appendChild(g);
     });
 

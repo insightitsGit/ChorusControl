@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+
+_log = logging.getLogger("choruscontrol.audit")
 
 
 class AuditLogger:
@@ -25,6 +29,7 @@ class AuditLogger:
         self.postgres = postgres
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
+        self.on_action: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
     @property
     def public_pem(self) -> str:
@@ -62,6 +67,11 @@ class AuditLogger:
         raw = json.dumps(envelope, sort_keys=True, default=str).encode("utf-8")
         envelope["signature"] = self.private_key.sign(raw).hex()
         await self._queue.put(envelope)
+        if self.on_action is not None:
+            try:
+                await self.on_action(envelope)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("audit on_action hook failed: %s", exc)
         return envelope
 
     async def _writer(self) -> None:

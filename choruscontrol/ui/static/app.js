@@ -91,6 +91,7 @@ const blurbs = {
   memory: "Bitemporal facts and conflict resolution with correction cascade.",
   cortex: "PrismCortex activity, memory graph chunks, digest / recall / sleep.",
   guard: "Policy Studio for ingress profiles — hub paths never force law ONNX.",
+  logs: "Searchable ops log bus — audit, fleet, ledger, cascade, and agent push — with live WebSocket stream.",
   admin: "License, doctor, fleet enrollment, Asset Graph, incidents, and compliance.",
 };
 
@@ -109,6 +110,7 @@ const eyebrows = {
   memory: "Cortex memory",
   cortex: "PrismCortex",
   guard: "Security governance",
+  logs: "Ops telemetry",
   admin: "Platform control",
 };
 
@@ -157,6 +159,21 @@ function setChatOpen(open) {
 document.getElementById("openChat")?.addEventListener("click", () => setChatOpen(true));
 document.getElementById("fabChat")?.addEventListener("click", () => setChatOpen(true));
 document.getElementById("closeChat")?.addEventListener("click", () => setChatOpen(false));
+
+(() => {
+  const chip = document.getElementById("licChip");
+  if (!chip) return;
+  const goAdmin = () => {
+    location.href = "/admin";
+  };
+  chip.addEventListener("click", goAdmin);
+  chip.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      goAdmin();
+    }
+  });
+})();
 
 let pendingExecute = null;
 
@@ -251,12 +268,205 @@ function formatAssistantText(text) {
     .replace(/\n/g, "<br/>");
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Highlight query tokens in text for Taxonomy search results. */
+function highlightQuery(text, query) {
+  const raw = String(text || "");
+  const q = String(query || "").trim();
+  if (!q) return escapeHtml(raw);
+  const tokens = q.split(/\s+/).filter((t) => t.length >= 2);
+  if (!tokens.length && q.length) tokens.push(q);
+  const re = new RegExp(`(${tokens.map(escapeRegExp).join("|")})`, "gi");
+  return escapeHtml(raw).replace(re, '<mark class="tax-hit">$1</mark>');
+}
+
+function scoreBar(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return `<span class="score-meta">—</span>`;
+  // PrismRAG scores may be similarity 0–1 or distance-ish; normalize for display
+  let pct = n;
+  if (n > 0 && n <= 1) pct = Math.round(n * 100);
+  else if (n > 1 && n <= 100) pct = Math.round(n);
+  else pct = Math.max(0, Math.min(100, Math.round(100 - Math.min(n, 100))));
+  return `<div class="tax-score" title="${escapeHtml(String(score))}">
+    <div class="tax-score-track"><div class="tax-score-fill" style="width:${pct}%"></div></div>
+    <span class="tax-score-num">${pct}%</span>
+  </div>`;
+}
+
+function formatLogTs(ts) {
+  const n = Number(ts) || 0;
+  if (!n) return "—";
+  try {
+    return new Date(n * 1000).toLocaleString();
+  } catch (_) {
+    return String(ts);
+  }
+}
+
+function logRowHtml(e) {
+  const lvl = (e.level || "info").toLowerCase();
+  const meta = [e.node_id, e.tenant_id, e.run_id].filter(Boolean).map(escapeHtml).join(" · ");
+  const fieldsEnc = encodeURIComponent(JSON.stringify(e.fields || {}));
+  return `<button type="button" class="log-row level-${escapeHtml(lvl)}" data-log-id="${escapeHtml(
+    e.log_id || ""
+  )}" data-fields="${fieldsEnc}" title="Show log fields">
+    <span class="log-ts">${escapeHtml(formatLogTs(e.ts))}</span>
+    <span class="log-level">${escapeHtml(lvl)}</span>
+    <span class="log-source">${escapeHtml(e.source || "system")}</span>
+    <span class="log-msg">${escapeHtml(e.message || "")}${
+      meta ? `<span class="log-meta">${meta}</span>` : ""
+    }</span>
+  </button>`;
+}
+
+function parseLogFieldsAttr(el) {
+  try {
+    return JSON.parse(decodeURIComponent(el.getAttribute("data-fields") || "%7B%7D"));
+  } catch (_) {
+    return {};
+  }
+}
+
+function bindLogRowClicks(listEl, detailEl) {
+  if (!listEl) return;
+  listEl.querySelectorAll(".log-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      listEl.querySelectorAll(".log-row.is-selected").forEach((r) => r.classList.remove("is-selected"));
+      row.classList.add("is-selected");
+      const fields = parseLogFieldsAttr(row);
+      const msg = row.querySelector(".log-msg")?.childNodes?.[0]?.textContent || "";
+      const src = row.querySelector(".log-source")?.textContent || "";
+      const html = `<strong>${escapeHtml(src)}</strong> · ${escapeHtml(msg)}
+        <pre class="log-fields">${escapeHtml(JSON.stringify(fields, null, 2))}</pre>`;
+      if (detailEl) detailEl.innerHTML = html;
+      else {
+        let panel = listEl.parentElement?.querySelector(".log-detail");
+        if (!panel) {
+          panel = document.createElement("div");
+          panel.className = "log-detail viz-detail";
+          listEl.insertAdjacentElement("afterend", panel);
+        }
+        panel.innerHTML = html;
+      }
+    });
+  });
+}
+
+/** Layer health cells → real destinations (no dead hover affordances). */
+const HEALTH_LAYER_ACTIONS = {
+  L0: { href: "/admin", label: "Open Admin · doctor" },
+  L1: { href: "/admin", label: "Open Admin · license" },
+  L2: { href: "/admin", label: "Open Admin · storage" },
+  L3: { href: "/logs", label: "Open Logs · transport" },
+  L4: { href: null, scroll: "vizFleet", ask: null, label: "Focus fleet topology" },
+  L5: { href: "/taxonomy", label: "Open Taxonomy · packs" },
+};
+
+function bindHealthCellClicks(root) {
+  (root || document).querySelectorAll(".health-cell[data-layer]").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const layer = cell.getAttribute("data-layer");
+      const action = HEALTH_LAYER_ACTIONS[layer];
+      if (!action) return;
+      if (action.href) {
+        location.href = action.href;
+        return;
+      }
+      if (action.scroll) {
+        const el = document.getElementById(action.scroll);
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        el?.classList.add("is-flash");
+        setTimeout(() => el?.classList.remove("is-flash"), 1200);
+        const detail = document.getElementById("fleetDetail");
+        if (detail) {
+          detail.innerHTML = `<strong>${escapeHtml(layer)}</strong> · ${escapeHtml(
+            cell.querySelector(".health-name")?.textContent || "workers"
+          )} — ${escapeHtml(cell.querySelector(".health-detail")?.textContent || "")}. Click a worker node for inventory.`;
+        }
+        return;
+      }
+      if (action.ask) {
+        setChatOpen(true);
+        askAssistant(action.ask).catch(() => {});
+      }
+    });
+  });
+}
+
+function bindLogsLive(listEl, { prepend = false, maxRows = 200, detailEl = null } = {}) {
+  if (!listEl) return;
+  try {
+    if (window._ccLogsWs) {
+      try {
+        window._ccLogsWs.close();
+      } catch (_) {}
+      window._ccLogsWs = null;
+    }
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(
+      `${proto}://${location.host}/api/v1/logs/live?token=${encodeURIComponent(token || "")}`
+    );
+    window._ccLogsWs = ws;
+    const liveDot = document.getElementById("logsLiveState");
+    ws.onopen = () => {
+      if (liveDot) liveDot.textContent = "live";
+    };
+    ws.onclose = () => {
+      if (liveDot) liveDot.textContent = "offline";
+    };
+    ws.onerror = () => {
+      if (liveDot) liveDot.textContent = "error";
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "snapshot" && Array.isArray(msg.entries)) {
+          // History already loaded via REST; only fill if empty
+          if (!listEl.children.length) {
+            listEl.innerHTML = msg.entries.map(logRowHtml).join("") || `<p class="empty">No logs yet</p>`;
+            bindLogRowClicks(listEl, detailEl);
+          }
+          return;
+        }
+        if (msg.type === "log" && msg.entry) {
+          const empty = listEl.querySelector(".empty");
+          if (empty) empty.remove();
+          const html = logRowHtml(msg.entry);
+          if (prepend) listEl.insertAdjacentHTML("afterbegin", html);
+          else listEl.insertAdjacentHTML("beforeend", html);
+          const added = prepend ? listEl.querySelector(".log-row") : listEl.querySelector(".log-row:last-of-type");
+          if (added) {
+            added.addEventListener("click", () => {
+              listEl.querySelectorAll(".log-row.is-selected").forEach((r) => r.classList.remove("is-selected"));
+              added.classList.add("is-selected");
+              const fields = parseLogFieldsAttr(added);
+              const target =
+                detailEl ||
+                listEl.parentElement?.querySelector(".log-detail") ||
+                (() => {
+                  const p = document.createElement("div");
+                  p.className = "log-detail viz-detail";
+                  listEl.insertAdjacentElement("afterend", p);
+                  return p;
+                })();
+              target.innerHTML = `<strong>${escapeHtml(msg.entry.source || "")}</strong> · ${escapeHtml(
+                msg.entry.message || ""
+              )}<pre class="log-fields">${escapeHtml(JSON.stringify(fields, null, 2))}</pre>`;
+            });
+          }
+          while (listEl.querySelectorAll(".log-row").length > maxRows) {
+            const rows = listEl.querySelectorAll(".log-row");
+            (prepend ? rows[rows.length - 1] : rows[0]).remove();
+          }
+          if (!prepend) listEl.scrollTop = listEl.scrollHeight;
+        }
+      } catch (_) {}
+    };
+  } catch (_) {}
 }
 
 document.getElementById("chatForm")?.addEventListener("submit", async (e) => {
@@ -453,13 +663,19 @@ async function renderOverview(payload) {
   const pipes = payload.pipelines || {};
   const m = payload.matrix || {};
   const cells = Object.entries(m)
-    .map(
-      ([k, v]) => `<div class="health-cell ${v.ok ? "is-ok" : "is-bad"}">
-      <div class="health-layer">${k}</div>
-      <div class="health-name">${v.name || ""}</div>
-      <div class="health-detail">${v.state || v.primary || (v.count != null ? v.count + " workers" : v.ok ? "healthy" : "check")}</div>
-    </div>`
-    )
+    .map(([k, v]) => {
+      const action = HEALTH_LAYER_ACTIONS[k];
+      const title = action ? action.label : "";
+      return `<button type="button" class="health-cell is-actionable ${v.ok ? "is-ok" : "is-bad"}" data-layer="${escapeHtml(
+        k
+      )}" title="${escapeHtml(title)}">
+      <div class="health-layer">${escapeHtml(k)}</div>
+      <div class="health-name">${escapeHtml(v.name || "")}</div>
+      <div class="health-detail">${escapeHtml(
+        v.state || v.primary || (v.count != null ? v.count + " workers" : v.ok ? "healthy" : "check")
+      )}</div>
+    </button>`;
+    })
     .join("");
 
   const dims = payload.score?.dimensions || {};
@@ -597,11 +813,28 @@ async function renderOverview(payload) {
         "Correction cascade",
         `<div class="viz-frame" id="vizCascade"></div>
          <div class="viz-meta"><span>State <strong>${pipes.cascade?.state || "idle"}</strong></span>
-         <span>${pipes.cascade?.cascade_id ? pipes.cascade.cascade_id.slice(0, 12) + "…" : "—"}</span></div>`,
+         <span>${pipes.cascade?.cascade_id ? pipes.cascade.cascade_id.slice(0, 12) + "…" : "—"}</span></div>
+         <div class="viz-detail" id="cascadeDetail">Click a cascade step for detail.</div>`,
         "Invalidation flow",
         140
       )}
     </div>
+
+    ${section(
+      "Ops logs",
+      `<div class="logs-toolbar">
+         <span class="hint">Realtime stream · <span id="logsLiveState">connecting…</span></span>
+         <a class="btn secondary" href="/logs" style="text-decoration:none">Open Logs tab</a>
+       </div>
+       <div class="log-stream" id="overviewLogStream">${
+         (payload.logs?.entries || []).length
+           ? (payload.logs.entries || []).slice(0, 25).map(logRowHtml).join("")
+           : `<p class="empty">No ops logs yet — mother events appear here live.</p>`
+       }</div>
+       <div class="log-detail viz-detail" id="overviewLogDetail">Click a log line for fields.</div>`,
+      "Audit · fleet · ledger · cascade",
+      160
+    )}
   `;
 
   const numEl = document.getElementById("scoreNum");
@@ -613,6 +846,16 @@ async function renderOverview(payload) {
   if (runId) document.getElementById("pipeRunId").textContent = runId;
 
   requestAnimationFrame(() => {
+    bindLogsLive(document.getElementById("overviewLogStream"), {
+      prepend: true,
+      maxRows: 40,
+      detailEl: document.getElementById("overviewLogDetail"),
+    });
+    bindLogRowClicks(
+      document.getElementById("overviewLogStream"),
+      document.getElementById("overviewLogDetail")
+    );
+    bindHealthCellClicks(view);
     if (!window.CCViz) return;
     CCViz.renderExecutionPipeline(document.getElementById("vizPipeline"), pipes.execution, {
       onSelect: (stage) => {
@@ -620,17 +863,31 @@ async function renderOverview(payload) {
           stage.label
         )}</strong> · ${escapeHtml(stage.decision || "—")} ${
           stage.gate ? "· gate " + escapeHtml(stage.gate) : ""
-        } · status <code>${escapeHtml(stage.status || "")}</code>`;
+        } · status <code>${escapeHtml(stage.status || "")}</code>
+        <a class="btn secondary" href="/trace" style="margin-left:0.5rem;text-decoration:none;display:inline-block;padding:0.25rem 0.6rem;font-size:0.75rem">Open Trace</a>`;
       },
     });
+    const fleetSelect = (n) => {
+      document.getElementById("fleetDetail").innerHTML = `<strong>${escapeHtml(
+        n.label
+      )}</strong> · ${escapeHtml(n.role)} · ${n.online ? "online" : "stale"} · zone ${escapeHtml(
+        n.zone || "—"
+      )} · drops ${n.agent_ledger_dropped_total ?? n.ledger_dropped ?? 0}<br/><span class="score-meta">Products: ${(
+        n.products || []
+      )
+        .map(escapeHtml)
+        .join(", ") || "—"}</span>
+        <p style="margin:0.5rem 0 0"><a class="btn secondary" href="/logs" style="text-decoration:none;display:inline-block;padding:0.25rem 0.6rem;font-size:0.75rem">Filter in Logs</a></p>`;
+    };
     CCViz.renderFleetTopology(document.getElementById("vizFleet"), pipes.fleet, {
       height: 220,
-      onSelect: (n) => {
-        document.getElementById("fleetDetail").innerHTML = `<strong>${escapeHtml(
-          n.label
-        )}</strong> · ${escapeHtml(n.role)} · ${n.online ? "online" : "stale"} · zone ${escapeHtml(
-          n.zone || "—"
-        )} · drops ${n.agent_ledger_dropped_total ?? n.ledger_dropped ?? 0}<br/><span class="score-meta">Products: ${(n.products || []).map(escapeHtml).join(", ") || "—"}</span>`;
+      onSelect: fleetSelect,
+      onSelectMother: () => {
+        document.getElementById("fleetDetail").innerHTML = `<strong>Mother</strong> · this control plane · ${
+          (pipes.fleet || []).length
+        } enrolled agent(s).
+        <p style="margin:0.5rem 0 0"><a class="btn secondary" href="/admin" style="text-decoration:none;display:inline-block;padding:0.25rem 0.6rem;font-size:0.75rem">Open Admin</a>
+        <a class="btn secondary" href="/logs" style="margin-left:0.35rem;text-decoration:none;display:inline-block;padding:0.25rem 0.6rem;font-size:0.75rem">Ops Logs</a></p>`;
       },
     });
     // Live fleet WS (poll fallback already loaded via pipelines)
@@ -652,7 +909,12 @@ async function renderOverview(payload) {
                     onSelect: (n) => {
                       document.getElementById("fleetDetail").innerHTML = `<strong>${escapeHtml(
                         n.label
-                      )}</strong> · drops ${n.agent_ledger_dropped_total ?? 0}`;
+                      )}</strong> · drops ${n.agent_ledger_dropped_total ?? 0}
+                      <p style="margin:0.5rem 0 0"><a class="btn secondary" href="/logs" style="text-decoration:none;display:inline-block;padding:0.25rem 0.6rem;font-size:0.75rem">Filter in Logs</a></p>`;
+                    },
+                    onSelectMother: () => {
+                      document.getElementById("fleetDetail").innerHTML =
+                        `<strong>Mother</strong> · live topology refresh · <a href="/admin">Admin</a>`;
                     },
                   });
                 }
@@ -671,13 +933,23 @@ async function renderOverview(payload) {
           const br = await j("/api/v1/graph/blast-radius?asset_id=" + encodeURIComponent(n.id));
           el.innerHTML = `<strong>${escapeHtml(n.label)}</strong> (${escapeHtml(n.kind)}) · impacts ${
             (br.impacts || []).length
-          } · depends_on ${(br.depends_on || []).length}`;
+          } · depends_on ${(br.depends_on || []).length}
+          <p style="margin:0.5rem 0 0"><a class="btn secondary" href="/admin" style="text-decoration:none;display:inline-block;padding:0.25rem 0.6rem;font-size:0.75rem">Open Admin · Asset Graph</a></p>`;
         } catch (e) {
           el.textContent = String(e.message || e);
         }
       },
     });
-    CCViz.renderCascade(document.getElementById("vizCascade"), pipes.cascade);
+    CCViz.renderCascade(document.getElementById("vizCascade"), pipes.cascade, {
+      onSelect: (stage) => {
+        const el = document.getElementById("cascadeDetail");
+        if (!el) return;
+        el.innerHTML = `<strong>${escapeHtml(stage.label || stage.id || "step")}</strong> · status <code>${escapeHtml(
+          stage.status || ""
+        )}</code> · cascade <code>${escapeHtml(pipes.cascade?.state || "idle")}</code>
+        <p style="margin:0.5rem 0 0"><a class="btn secondary" href="/cortex" style="text-decoration:none;display:inline-block;padding:0.25rem 0.6rem;font-size:0.75rem">Open Cortex</a></p>`;
+      },
+    });
   });
 
   document.querySelectorAll("[data-view-mode]").forEach((el) => {
@@ -692,6 +964,106 @@ async function renderOverview(payload) {
       await renderOverview(payload);
     };
   }
+}
+
+async function renderLogs(payload) {
+  const sources = payload.sources || [];
+  const sourceOpts = [`<option value="">all sources</option>`]
+    .concat(sources.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`))
+    .join("");
+  actions.innerHTML =
+    btn("Search", "logsSearch") + btn("Clear filters", "logsClear", "secondary");
+  view.innerHTML = `
+    ${section(
+      "Search & live stream",
+      `<div class="logs-filters">
+         <label class="field"><span>Query</span><input id="logsQ" type="search" placeholder="message, run_id, fields…" value="${escapeHtml(
+           payload.q || ""
+         )}" /></label>
+         <label class="field"><span>Source</span><select id="logsSource">${sourceOpts}</select></label>
+         <label class="field"><span>Level</span>
+           <select id="logsLevel">
+             <option value="">all</option>
+             <option value="debug">debug</option>
+             <option value="info">info</option>
+             <option value="warn">warn</option>
+             <option value="error">error</option>
+           </select>
+         </label>
+         <label class="field"><span>Tenant</span><input id="logsTenant" type="text" placeholder="optional" value="${escapeHtml(
+           payload.tenant_id || ""
+         )}" /></label>
+         <label class="field"><span>Node</span><input id="logsNode" type="text" placeholder="optional" value="${escapeHtml(
+           payload.node_id || ""
+         )}" /></label>
+       </div>
+       <div class="logs-toolbar">
+         <span class="hint"><span id="logsLiveState">connecting…</span> · ${(payload.entries || []).length} shown</span>
+       </div>
+       <div class="log-stream log-stream-tall" id="logsStream">${
+         (payload.entries || []).length
+           ? (payload.entries || []).map(logRowHtml).join("")
+           : `<p class="empty">No matching logs</p>`
+       }</div>
+       <div class="log-detail viz-detail" id="logsDetail">Click a log line for fields.</div>`,
+      "GET /api/v1/logs · WS /api/v1/logs/live",
+      0
+    )}
+  `;
+  const srcEl = document.getElementById("logsSource");
+  if (srcEl && payload.source) srcEl.value = payload.source;
+  const lvlEl = document.getElementById("logsLevel");
+  if (lvlEl && payload.level) lvlEl.value = payload.level;
+
+  async function runSearch() {
+    const q = document.getElementById("logsQ")?.value?.trim() || "";
+    const source = document.getElementById("logsSource")?.value || "";
+    const level = document.getElementById("logsLevel")?.value || "";
+    const tenant_id = document.getElementById("logsTenant")?.value?.trim() || "";
+    const node_id = document.getElementById("logsNode")?.value?.trim() || "";
+    const params = new URLSearchParams({ limit: "200" });
+    if (q) params.set("q", q);
+    if (source) params.set("source", source);
+    if (level) params.set("level", level);
+    if (tenant_id) params.set("tenant_id", tenant_id);
+    if (node_id) params.set("node_id", node_id);
+    const next = await soft(`/api/v1/logs?${params}`, { entries: [], sources });
+    payload = {
+      ...payload,
+      ...next,
+      q,
+      source,
+      level,
+      tenant_id,
+      node_id,
+      entries: next.entries || [],
+      sources: next.sources || sources,
+    };
+    lastRender = () => renderLogs(payload);
+    await renderLogs(payload);
+  }
+
+  document.getElementById("logsSearch").onclick = () => runSearch();
+  document.getElementById("logsClear").onclick = async () => {
+    payload = { entries: payload.entries, sources, q: "", source: "", level: "", tenant_id: "", node_id: "" };
+    const next = await soft("/api/v1/logs?limit=200", { entries: [], sources });
+    payload.entries = next.entries || [];
+    payload.sources = next.sources || sources;
+    lastRender = () => renderLogs(payload);
+    await renderLogs(payload);
+  };
+  document.getElementById("logsQ")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runSearch();
+    }
+  });
+  bindLogRowClicks(document.getElementById("logsStream"), document.getElementById("logsDetail"));
+  bindLogsLive(document.getElementById("logsStream"), {
+    prepend: true,
+    maxRows: 300,
+    detailEl: document.getElementById("logsDetail"),
+  });
 }
 
 async function renderTrace(payload) {
@@ -853,27 +1225,38 @@ async function renderTaxonomy(payload) {
             partOptions || `<option value="kb_markdown">kb_markdown</option>`
           }</select>
         </label>
-        <label class="tax-search">Search term
-          <input id="taxQuery" type="search" placeholder="med recon, allergy, insulin…" />
+        <label class="tax-search">Search knowledge
+          <input id="taxQuery" type="search" placeholder="e.g. insulin, allergy, med recon" autocomplete="off" />
         </label>
-        <button type="button" class="btn" id="doTaxSearch">Search + embed</button>
+        <button type="button" class="btn" id="doTaxSearch">Search</button>
       </div>
       <div id="taxJobStatus" class="score-meta" style="margin-top:0.65rem" role="status">
-        Search runs PrismRAG embed retrieval, shows related words, and lets admins overwrite a chunk online.
+        Type a term and press Search (or Enter). Matches highlight in the results table below.
       </div>
     </div>
+    ${section(
+      "Search results",
+      `<div id="taxSearchHits">
+         <div class="tax-empty-state">
+           <p class="tax-empty-title">No search yet</p>
+           <p class="empty">Enter a word above to find matching chunks. Hits, related terms, and Edit appear here.</p>
+         </div>
+       </div>`,
+      "PrismRAG embed retrieval",
+      0
+    )}
     <div class="grid-2">
       ${section(
         "Category tree",
-        `<table class="data"><thead><tr><th>Slug</th><th>Label</th></tr></thead><tbody>${
-          cats || `<tr><td colspan="2" class="empty">Empty</td></tr>`
+        `<table class="data tax-table"><thead><tr><th scope="col">Slug</th><th scope="col">Label</th></tr></thead><tbody>${
+          cats || `<tr><td colspan="2" class="empty">No categories for this tenant</td></tr>`
         }</tbody></table>`,
         escapeHtml(tenantId),
-        0
+        40
       )}
       ${section(
         "Partitions",
-        `<table class="data"><thead><tr><th>Partition</th><th>Ver</th><th>Status</th><th>Tenant</th></tr></thead><tbody>${
+        `<table class="data tax-table"><thead><tr><th scope="col">Partition</th><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Tenant</th></tr></thead><tbody>${
           parts || `<tr><td colspan="4" class="empty">No partitions</td></tr>`
         }</tbody></table>`,
         payload.tree?.demo || payload.health?.demo ? "DEMO NullRAG partitions" : "live",
@@ -882,7 +1265,7 @@ async function renderTaxonomy(payload) {
     </div>
     ${section(
       "Chunk health",
-      `<table class="data"><thead><tr><th>Category</th><th>Staleness</th><th>State</th></tr></thead><tbody>${
+      `<table class="data tax-table"><thead><tr><th scope="col">Category</th><th scope="col">Staleness</th><th scope="col">State</th></tr></thead><tbody>${
         decay || `<tr><td colspan="3" class="empty">No decay data</td></tr>`
       }</tbody></table>
        <p class="score-meta" style="margin-top:0.75rem">Bleed risk: ${
@@ -890,12 +1273,6 @@ async function renderTaxonomy(payload) {
        }</p>`,
       "PrismRAG",
       80
-    )}
-    ${section(
-      "Search · related embeddings · overwrite",
-      `<div id="taxSearchHits"><p class="empty">Search a term to see hits, related words from the embedding/community graph, and edit a chunk online.</p></div>`,
-      "admin overwrite",
-      120
     )}
   `;
 
@@ -931,42 +1308,92 @@ async function renderTaxonomy(payload) {
   function renderSearchPanel(r) {
     const hitsEl = document.getElementById("taxSearchHits");
     if (!hitsEl) return;
+    const query = r.query || document.getElementById("taxQuery")?.value || "";
     const resultRows = r.results || [];
+    const hitCount = resultRows.length;
+    const found = hitCount > 0;
     const related = (r.related_terms || [])
       .map(
         (t) =>
           `<button type="button" class="rel-chip" data-term="${escapeHtml(t.term)}" title="${escapeHtml(
-            t.relation || t.source || ""
-          )}">${escapeHtml(t.term)}</button>`
+            t.relation || t.source || "related"
+          )}"><span class="rel-chip-term">${escapeHtml(t.term)}</span>${
+            t.relation ? `<span class="rel-chip-why">${escapeHtml(t.relation)}</span>` : ""
+          }</button>`
       )
       .join("");
+
     const rows = resultRows
       .map((h, i) => {
-        const ref = h.chunk_ref || h.category_slug || `hit-${i}`;
+        const ref = h.chunk_ref || h.category_slug || `hit-${i + 1}`;
         const text = h.chunk_text || h.text || "";
-        return `<tr>
-          <td><code>${escapeHtml(ref)}</code></td>
-          <td>${escapeHtml(h.category_slug || "")}</td>
-          <td>${escapeHtml(text)}</td>
-          <td>${escapeHtml(String(h.score ?? ""))}</td>
-          <td><button type="button" class="btn secondary tax-pick" data-i="${i}">Edit</button></td>
+        const cat = h.category_slug || "—";
+        const matched = new RegExp(
+          escapeRegExp(String(query).trim().split(/\s+/).filter(Boolean)[0] || "a^"),
+          "i"
+        ).test(text + " " + ref + " " + cat);
+        return `<tr class="tax-hit-row ${matched ? "has-literal-match" : ""}">
+          <td class="tax-rank"><span class="tax-rank-badge">#${i + 1}</span></td>
+          <td class="tax-match-cell">
+            <div class="tax-match-ref"><code>${escapeHtml(ref)}</code>
+              ${matched ? `<span class="tax-match-tag">contains “${escapeHtml(query)}”</span>` : `<span class="tax-match-tag is-embed">semantic match</span>`}
+            </div>
+            <div class="tax-snippet">${highlightQuery(text, query) || `<span class="empty">No text</span>`}</div>
+          </td>
+          <td class="tax-cat">${escapeHtml(cat)}</td>
+          <td class="tax-score-cell">${scoreBar(h.score)}</td>
+          <td class="tax-actions"><button type="button" class="btn secondary tax-pick" data-i="${i}">Edit</button></td>
         </tr>`;
       })
       .join("");
+
     hitsEl.innerHTML = `
-      <p class="score-meta">Engine <strong>${escapeHtml(r.engine || "?")}</strong>
-        · mode <strong>${escapeHtml(r.retrieval_mode || "?")}</strong>
-        ${r.demo ? " · DEMO fallback" : " · live PrismRAG"}
-        · query <code>${escapeHtml(r.query || "")}</code></p>
-      <div class="rel-wrap">
-        <div class="section-head"><h2 style="font-size:0.9rem;margin:0">Related words (embed / community)</h2></div>
-        <div class="rel-chips">${related || `<span class="empty">No related terms</span>`}</div>
-        <p class="score-meta">Click a related word to re-search. Hover for why it is related.</p>
+      <div class="tax-result-banner ${found ? "is-found" : "is-miss"}" role="status">
+        <div class="tax-result-banner-main">
+          <span class="tax-result-icon" aria-hidden="true">${found ? "✓" : "–"}</span>
+          <div>
+            <p class="tax-result-title">${
+              found
+                ? `Found <strong>${hitCount}</strong> match${hitCount === 1 ? "" : "es"} for`
+                : `No matches for`
+            } <mark class="tax-query-pill">${escapeHtml(query || "(empty)")}</mark></p>
+            <p class="tax-result-sub">Engine ${escapeHtml(r.engine || "?")} · ${escapeHtml(
+      r.retrieval_mode || "search"
+    )}${r.demo ? " · DEMO fallback" : " · live PrismRAG"} · ${(r.related_terms || []).length} related term${
+      (r.related_terms || []).length === 1 ? "" : "s"
+    }</p>
+          </div>
+        </div>
       </div>
-      <table class="data" style="margin-top:0.85rem">
-        <thead><tr><th>Chunk ref</th><th>Category</th><th>Text</th><th>Score</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" class="empty">No hits</td></tr>`}</tbody>
-      </table>
+      ${
+        related
+          ? `<div class="rel-wrap">
+        <p class="tax-rel-label">Related to your search — click to search that word</p>
+        <div class="rel-chips">${related}</div>
+      </div>`
+          : found
+            ? ""
+            : `<p class="empty" style="margin-top:0.75rem">Try a shorter word, another tenant, or Warm partition first.</p>`
+      }
+      <div class="tax-table-wrap">
+        <table class="data tax-hit-table">
+          <thead>
+            <tr>
+              <th scope="col">Rank</th>
+              <th scope="col">Matched text</th>
+              <th scope="col">Category</th>
+              <th scope="col">Score</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>${
+            rows ||
+            `<tr><td colspan="5" class="empty">Nothing ranked for “${escapeHtml(
+              query
+            )}”. Related chips above (if any) may still help.</td></tr>`
+          }</tbody>
+        </table>
+      </div>
       <div id="taxOverwrite" class="tax-overwrite surface" hidden style="margin-top:1rem;padding:0.9rem 1rem">
         <div class="section-head"><h2 style="font-size:0.95rem;margin:0">Overwrite chunk online</h2>
           <span class="hint">PrismRAG append_chunks upsert</span></div>
@@ -981,6 +1408,8 @@ async function renderTaxonomy(payload) {
         </div>
         <p id="owStatus" class="score-meta" style="margin-top:0.55rem"></p>
       </div>`;
+
+    hitsEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
     hitsEl.querySelectorAll(".rel-chip").forEach((chip) => {
       chip.addEventListener("click", async () => {
@@ -1045,22 +1474,54 @@ async function renderTaxonomy(payload) {
     const hitsEl = document.getElementById("taxSearchHits");
     const statusEl = document.getElementById("taxJobStatus");
     const tid = document.getElementById("taxTenant")?.value || tenantId;
-    const query = forcedQuery != null ? forcedQuery : document.getElementById("taxQuery")?.value || "";
+    const query = (forcedQuery != null ? forcedQuery : document.getElementById("taxQuery")?.value || "").trim();
+    if (!query) {
+      if (hitsEl) {
+        hitsEl.innerHTML = `<div class="tax-result-banner is-miss" role="status">
+          <div class="tax-result-banner-main">
+            <span class="tax-result-icon" aria-hidden="true">!</span>
+            <div><p class="tax-result-title">Enter a search word first</p>
+            <p class="tax-result-sub">Example: insulin, allergy, med recon</p></div>
+          </div></div>`;
+      }
+      if (statusEl) statusEl.innerHTML = `<span class="err">Query is empty</span>`;
+      return;
+    }
     try {
-      if (statusEl) statusEl.textContent = `Searching “${query}” with PrismRAG…`;
+      if (hitsEl) {
+        hitsEl.innerHTML = `<div class="tax-result-banner is-pending" role="status">
+          <div class="tax-result-banner-main">
+            <span class="tax-result-icon tax-spin" aria-hidden="true">↻</span>
+            <div><p class="tax-result-title">Searching for <mark class="tax-query-pill">${escapeHtml(
+              query
+            )}</mark>…</p>
+            <p class="tax-result-sub">PrismRAG embed retrieval</p></div>
+          </div></div>`;
+      }
+      if (statusEl) statusEl.textContent = `Searching “${query}”…`;
       const r = await j("/api/v1/taxonomy/search", {
         method: "POST",
         body: JSON.stringify({ tenant_id: tid, query, top_k: 8 }),
       });
       if (out) out.textContent = JSON.stringify(r, null, 2);
-      renderSearchPanel(r);
+      renderSearchPanel({ ...r, query: r.query || query });
+      const n = (r.results || []).length;
       if (statusEl) {
-        statusEl.innerHTML = `Search done · ${escapeHtml(r.engine || "")} · ${escapeHtml(
-          r.retrieval_mode || ""
-        )} · ${(r.results || []).length} hits · ${(r.related_terms || []).length} related terms`;
+        statusEl.innerHTML = n
+          ? `${status(true, "found")} <strong>${n}</strong> hit${n === 1 ? "" : "s"} for <code>${escapeHtml(
+              query
+            )}</code>`
+          : `${status(false, "no hits")} for <code>${escapeHtml(query)}</code>`;
       }
     } catch (err) {
-      if (hitsEl) hitsEl.innerHTML = `<p class="err">${escapeHtml(err.message || err)}</p>`;
+      if (hitsEl) {
+        hitsEl.innerHTML = `<div class="tax-result-banner is-miss" role="status">
+          <div class="tax-result-banner-main">
+            <span class="tax-result-icon" aria-hidden="true">!</span>
+            <div><p class="tax-result-title">Search failed</p>
+            <p class="tax-result-sub err">${escapeHtml(err.message || err)}</p></div>
+          </div></div>`;
+      }
       if (statusEl) statusEl.innerHTML = `<span class="err">${escapeHtml(err.message || err)}</span>`;
     }
   }
@@ -1797,7 +2258,7 @@ async function load() {
           } catch (__) {}
         }
       }
-      const [matrix, caps, fleet, drift, score, tax, driver, dogfood, pipelines, incidents, findings, versionDiff] =
+      const [matrix, caps, fleet, drift, score, tax, driver, dogfood, pipelines, incidents, findings, versionDiff, logs] =
         await Promise.all([
           soft("/api/v1/health/matrix", {}),
           soft("/api/v1/health/caps", {}),
@@ -1816,6 +2277,7 @@ async function load() {
           soft("/api/v1/incidents", { incidents: [] }),
           soft("/api/v1/compliance/findings", { findings: [] }),
           soft("/api/v1/fleet/version-diff?tenant_id=default", {}),
+          soft("/api/v1/logs?limit=25", { entries: [], sources: [] }),
         ]);
       payload = {
         matrix,
@@ -1830,12 +2292,18 @@ async function load() {
         incidents,
         findings,
         versionDiff,
+        logs,
       };
       if (payload.caps?.guard?.demo || payload.tax?.demo || payload.score?.demo) {
         document.getElementById("demoBanner").hidden = false;
       }
       lastRender = () => renderOverview(payload);
       await renderOverview(payload);
+    } else if (tab === "logs") {
+      const logs = await soft("/api/v1/logs?limit=200", { entries: [], sources: [] });
+      payload = { entries: logs.entries || [], sources: logs.sources || [], q: "", source: "", level: "", tenant_id: "", node_id: "" };
+      lastRender = () => renderLogs(payload);
+      await renderLogs(payload);
     } else if (tab === "trace") {
       const [recentT, pipelines] = await Promise.all([
         soft("/api/v1/traces/recent", { traces: [], entries: [] }),

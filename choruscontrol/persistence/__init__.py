@@ -174,6 +174,22 @@ CREATE TABLE IF NOT EXISTS deployment_snapshots (
   products_json TEXT,
   UNIQUE(tenant_id, day)
 );
+
+CREATE TABLE IF NOT EXISTS ops_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_id TEXT NOT NULL UNIQUE,
+  ts REAL NOT NULL,
+  source TEXT NOT NULL,
+  level TEXT NOT NULL,
+  tenant_id TEXT,
+  node_id TEXT,
+  run_id TEXT,
+  message TEXT NOT NULL,
+  fields_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS ops_logs_ts ON ops_logs(ts DESC);
+CREATE INDEX IF NOT EXISTS ops_logs_source_ts ON ops_logs(source, ts DESC);
+CREATE INDEX IF NOT EXISTS ops_logs_tenant_ts ON ops_logs(tenant_id, ts DESC);
 """
 
 

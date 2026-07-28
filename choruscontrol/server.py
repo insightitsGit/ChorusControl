@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
             "/api/v1/fleet/heartbeat",
             "/api/v1/fleet/ack",
             "/api/v1/fleet/ledger-batch",
+            "/api/v1/fleet/logs-batch",
             "/docs",
             "/openapi.json",
             "/redoc",
@@ -110,7 +111,7 @@ def create_app() -> FastAPI:
             status_code=200 if ready else 503,
         )
 
-    tabs = ["overview", "trace", "taxonomy", "cortex", "guard", "admin"]
+    tabs = ["overview", "trace", "taxonomy", "cortex", "guard", "logs", "admin"]
 
     def _page(request: Request, tab_name: str):
         cc = request.app.state.cc

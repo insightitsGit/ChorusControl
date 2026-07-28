@@ -52,7 +52,7 @@
           <button type="button" data-theme-set="light" id="themeLight">Light</button>
           <button type="button" data-theme-set="dark" id="themeDark">Dark</button>
         </div>
-        <div class="lic-chip" id="licChip" data-state="{{ license_state }}">
+        <div class="lic-chip is-actionable" id="licChip" data-state="{{ license_state }}" role="link" tabindex="0" title="Open Admin · license">
           <span class="lic-dot"></span>
           <span id="lic">{{ license_state }}</span>
         </div>
@@ -119,7 +119,7 @@
 
   <button type="button" class="fab-chat" id="fabChat" aria-label="Open Ops Assistant">Chat</button>
   <button type="button" class="nav-toggle" id="navToggle" aria-label="Open navigation">Menu</button>
-  <script src="/static/viz.js"></script>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/viz.js?v=5"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

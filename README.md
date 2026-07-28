@@ -32,8 +32,8 @@ ChorusControl is the **self-hosted ops layer** above ChorusGraph, PrismGuard, Pr
 
 | Layer | Role |
 |-------|------|
-| **Mother** | FastAPI AI Ops UI + control APIs (Overview, Trace, Taxonomy, Cortex, Guard, Admin) |
-| **Fleet agent** | Background-only join / heartbeat / commands — **zero hot-path latency** on invoke/digest/recall |
+| **Mother** | FastAPI AI Ops UI + control APIs (Overview, Trace, Taxonomy, Cortex, Guard, **Logs**, Admin) |
+| **Fleet agent** | Background-only join / heartbeat / commands / optional log+ledger export — **zero hot-path latency** on invoke/digest/recall |
 | **Correction cascade** | Cortex conflict → cache invalidate → Graph `mark_revalidate` → Shine consistency — one audited action |
 | **License** | Offline Ed25519 verify (Side 1 JWT) + optional ~14-day online revoke check |
 
@@ -53,7 +53,8 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 
 | Pain | ChorusControl answer |
 |------|----------------------|
-| Many Prism nodes, no single ops surface | Six-tab mother + Ops Assistant grounded in live telemetry |
+| Many Prism nodes, no single ops surface | Seven-tab mother (incl. **Logs**) + Ops Assistant grounded in live telemetry |
+| One mother, many ChorusGraph workers | Fleet registry + per-`node_id` ledger / ops logs (filter in Logs tab) |
 | Fact correction doesn’t flush caches | **Correction cascade** (invalidate + revalidate + audit) |
 | Dashboards that lie about capabilities | **Honest caps** + DEMO labels when NullAdapters are in use |
 | Control plane on the request path | Agent is **background-only**; hot path stays local |
@@ -202,16 +203,34 @@ attach_agent()
 
 | Feature | Description |
 |---------|-------------|
-| **Overview** | Fleet topology, health matrix, transparent AI Score, live pipeline viz |
-| **Trace** | Guard → Ledger → Shine wire; zero-token replay |
+| **Overview** | Fleet topology, health matrix, transparent AI Score, live pipeline viz, **Ops logs** live strip |
+| **Trace** | Guard → Ledger → Shine wire; multi-node Route Ledger; zero-token replay |
 | **Taxonomy** | Partition warm / reindex jobs; PrismRAG when pinned |
 | **Cortex** | PrismCortex activity, chunks, digest / recall / sleep |
 | **Guard studio** | Ingress profiles, shadow compare (feature-gated) |
+| **Logs** | Searchable ops log bus (audit, fleet, ledger, cascade, agent push) + realtime `WS /api/v1/logs/live` |
 | **Admin** | License, doctor, tenants, stack licenses, SOC2 export pack, compliance scan |
 | **Ops Assistant** | Guard → ChorusGraph → Shine wire + grounded answers; gated execute |
 | **Cascade** | Conflict resolve → invalidate → `mark_revalidate` → fleet ACKs |
+| **Multi-agent fleet** | One mother · many agents (`max_nodes`); filter Logs / Trace by `node_id` |
 | **License** | Offline Ed25519 + 14-day grace; optional Side 1 `/validate` |
 | **Exec / Eng modes** | Overview lenses for business vs engineering |
+
+### Ops Logs (mother)
+
+Mother ships a unified **ops log bus** (SQLite-backed) for platform events — not a replacement for container stdout scrapers, and **not** ChorusFabric (Fabric remains optional mesh; the dashboard uses HTTP WebSockets).
+
+| Surface | Path |
+|---------|------|
+| Logs tab | `/logs` — search by query / source / level / tenant / **node** |
+| Overview section | Live tail + link to Logs tab |
+| REST search | `GET /api/v1/logs` |
+| Realtime | `WS /api/v1/logs/live?token=…` (viewer+) |
+| Agent push (optional) | `POST /api/v1/fleet/logs-batch` (session auth, same pattern as ledger-batch) |
+
+Captured sources include mother **audit**, **fleet** join/heartbeat/ack, **ledger** batches, **cascade**, and boot **system** lines. Multi-worker ChorusGraph **execution** truth still flows primarily through **Trace** via async `LEDGER_BATCH` (`/api/v1/fleet/ledger-batch`) per §3.19.6b.
+
+> **Install note:** Logs UI is on **tip-of-main** (mother package only). PyPI `0.1.2` does not include it yet — use a git install or wait for the next patch release.
 
 ---
 
@@ -221,10 +240,10 @@ attach_agent()
                     Customer VPC (Side 2)
 ┌──────────────────────────────────────────────────────────┐
 │  Mother  :8443                                           │
-│  UI tabs · /api/v1 · jobs · cascade · audit · SQLite/PG  │
+│  UI tabs (… Logs …) · /api/v1 · jobs · cascade · audit · ops_logs · SQLite/PG │
 └─────────────┬────────────────────────────────────────────┘
-              │ HTTP join / heartbeat / commands (primary)
-              │ Fabric optional
+              │ HTTP join / heartbeat / commands / ledger-batch / logs-batch (primary)
+              │ Fabric optional (invalidation mesh — not browser Logs WS)
      ┌────────┼────────┬────────────┐
      ▼        ▼        ▼            ▼
   GREEN     BLUE    ORANGE      MEMORY/CORTEX
@@ -233,6 +252,7 @@ attach_agent()
      └────────┴────────┴────────────┘
         Prism packs local (Guard / Graph / Shine / RAG / Cortex)
         Agent = background only — no mother RTT on invoke
+        Each node may export ledger (+ optional ops lines) tagged with node_id
 ```
 
 License **issuance** stays on Side 1. Mother verifies offline (and may optionally re-check revoke status ~every 14 days).
