@@ -155,22 +155,22 @@ async def test_compliance_optional_null_not_flagged(tmp_path, monkeypatch):
     from choruscontrol.services.compliance import run_compliance_scan
 
     app = create_app()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        async with app.router.lifespan_context(app):
-            # Only optional fabric null — should not raise auto.adapters.null for fabric alone
-            app.state.cc.adapter_sources = {
-                "guard": "live:x",
-                "shine": "live:x",
-                "cortex": "live:x",
-                "graph": "live:x",
-                "rag": "live:x",
-                "cache": "live:x",
-                "fabric": "null",
-            }
-            out = await run_compliance_scan(app.state.cc)
-            codes = [f.get("code") for f in out.get("findings") or out.get("created") or []]
-            # Also check DB findings
-            rows = await app.state.cc.store.fetchall(
-                "SELECT code, detail_json FROM compliance_findings WHERE resolved=0 AND code='auto.adapters.null'"
-            )
-            assert not rows, f"optional fabric null should not flag: {rows}"
+    async with app.router.lifespan_context(app):
+        # Only optional fabric null — should not raise auto.adapters.null for fabric alone
+        app.state.cc.adapter_sources = {
+            "guard": "live:x",
+            "shine": "live:x",
+            "cortex": "live:x",
+            "graph": "live:x",
+            "rag": "live:x",
+            "cache": "live:x",
+            "fabric": "null",
+        }
+        out = await run_compliance_scan(app.state.cc)
+        codes = [f.get("code") for f in out.get("findings") or out.get("created") or []]
+        assert "auto.adapters.null" not in codes, f"optional fabric null should not flag: {codes}"
+        # Also check DB findings
+        rows = await app.state.cc.store.fetchall(
+            "SELECT code, detail_json FROM compliance_findings WHERE resolved=0 AND code='auto.adapters.null'"
+        )
+        assert not rows, f"optional fabric null should not flag: {rows}"
