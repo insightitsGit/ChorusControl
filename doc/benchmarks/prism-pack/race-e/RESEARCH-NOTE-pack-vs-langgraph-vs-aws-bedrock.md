@@ -1,10 +1,16 @@
-# Pack vs LangGraph vs AWS Bedrock — Who Actually Wins?
+# ChorusGraph Pack vs LangGraph Pack vs AWS Bedrock Pack — Who Actually Wins?
 
 **Research note · Race E · Insight IT Solutions**  
 **Run:** `general_v1_pcl2a_20260725` · seed **42** · n=100 per lane · hosting **H2-phase2**
 
-> Hosted under [ChorusControl](https://github.com/insightitsGit/ChorusControl) docs because ChorusControl **governs** the Prism Pack.  
-> These numbers measure **Pack / LangGraph / AgentCore lanes** — **not** the ChorusControl UI.
+| Title name | Lane | Stack under test |
+|------------|------|------------------|
+| **ChorusGraph Pack** | PC / PN | PrismGuard → **ChorusGraph** → PrismShine (+ PrismAPI on PC; Cortex sidecar health-only) |
+| **LangGraph Pack** | L2 | **LangGraph** + re-embed on shared Postgres |
+| **AWS Bedrock Pack** | A1 | **AgentCore Runtime** + Guardrails + KB (+ Lambda + Gemini Identity) |
+
+> Hosted under [ChorusControl](https://github.com/insightitsGit/ChorusControl) docs because ChorusControl **governs** the ChorusGraph / Prism Pack.  
+> These numbers measure those packs / peers — **not** the ChorusControl UI.
 
 **Also:** [folder index](../README.md) · [machine COMPARISON_REPORT](COMPARISON_REPORT.md) · [pack landing](https://www.insightits.com/products/prism-pack.html)
 

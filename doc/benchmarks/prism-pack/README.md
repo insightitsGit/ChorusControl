@@ -1,7 +1,15 @@
-# Pack family benchmarks
+# ChorusGraph Pack vs LangGraph Pack vs AWS Bedrock Pack
+
+**Race E eye-to-eye board** — same mid finance fixture, seed 42, n=100/lane.
+
+| “Pack” in the title | What we actually ran |
+|---------------------|----------------------|
+| **ChorusGraph Pack** | PrismGuard → **ChorusGraph** → PrismShine (+ PrismAPI + Cortex sidecar on PC) |
+| **LangGraph Pack** | **LangGraph** peer + re-embed on the same Postgres (**L2**) |
+| **AWS Bedrock Pack** | Bedrock **AgentCore Runtime** + Guardrails + KB (**A1**) — not “all of AWS” |
 
 **Who this is for:** engineers comparing production agent stacks.  
-**Where you are:** [ChorusControl](https://github.com/insightitsGit/ChorusControl) docs — the ops plane that **governs** the Prism Pack. The numbers below measure the **pack** (and peers), not the ChorusControl dashboard UI.
+**Where you are:** [ChorusControl](https://github.com/insightitsGit/ChorusControl) docs — the ops plane that **governs** the ChorusGraph / Prism Pack. These numbers measure those stacks, not the ChorusControl dashboard UI.
 
 > **GitHub tip:** This folder’s file list only shows `README.md` + `race-e/`.  
 > **Open this README** (or the research note) for lane codes **PC / PN / L2 / A1** and product names. They are in the tables below — not as separate folder names.
@@ -40,7 +48,7 @@ We ran a vendor-authored mid finance-agent bake-off (**FinancePackBench**) so ea
 
 **Start here:** the full write-up — method, lane names, topology, results, and how to read them:
 
-→ **[Pack vs LangGraph vs AWS Bedrock — Who Actually Wins?](race-e/RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md)**
+→ **[ChorusGraph Pack vs LangGraph Pack vs AWS Bedrock Pack — Who Actually Wins?](race-e/RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md)**
 
 Machine appendix (raw lane tables): [`race-e/COMPARISON_REPORT.md`](race-e/COMPARISON_REPORT.md)
 
