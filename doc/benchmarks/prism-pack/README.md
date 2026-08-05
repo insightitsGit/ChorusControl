@@ -1,55 +1,75 @@
-# Prism Pack family benchmarks (hosted under ChorusControl)
+# Pack family benchmarks
 
-**ChorusControl** is the self-hosted ops / governance plane for the **Prism Pack**.  
-This folder is the **job-by-eye proof of the pack** that plane is built to operate and observe — so enterprise buyers find stack evidence under one roof.
-
-**Primary narrative (posted research note):**  
-[`RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md`](race-e/RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md)  
-**Machine report:** [`race-e/COMPARISON_REPORT.md`](race-e/COMPARISON_REPORT.md)  
-**Run:** `general_v1_pcl2a_20260725` · seed **42** · n=100/lane · hosting **H2-phase2**
-
-```
-proof · prism-pack · race-e · hosted-under:choruscontrol · measured:pack-lanes
-```
+**Who this is for:** engineers comparing production agent stacks.  
+**Where you are:** [ChorusControl](https://github.com/insightitsGit/ChorusControl) docs — the ops plane that **governs** the Prism Pack. The numbers below measure the **pack** (and peers), not the ChorusControl dashboard UI.
 
 ---
 
-## Claims guard
+## What we did (Race E)
 
-| Say | Do **not** say |
-|-----|----------------|
-| Pack (Guard → ChorusGraph → Shine ± PrismAPI) vs LangGraph vs Bedrock AgentCore path | “ChorusControl beat Bedrock / LangGraph” |
-| Evidence for the stack CC governs | “Race E measured the ChorusControl UI” |
-| Soft CTA: **CONTROL** (enterprise roof) · **GRADE** / Scorecard for PI | Cold Calendly · “beat AWS overall” |
-| Disclosures: H2 host · grounding strict weak cell · AgentCore LLM counter not comparable | Cross-host latency win · fewer LLM calls than Bedrock |
+We ran a vendor-authored mid finance-agent bake-off (**FinancePackBench**) so each stack faces the **same job** on the same fixture — not one blended “who beats AWS” score.
 
----
+| Setting | Value |
+|---------|--------|
+| Primary run | `general_v1_pcl2a_20260725` (**Race E**) |
+| Fixture | `2026-07-23.mid` finance FAQ + planted PI / hallucination suites |
+| Seed | **42** (paired across lanes) |
+| n per lane | **100** (40 task · 20 PI attack · 10 PI benign · 30 hallucination) |
+| Model | `gemini-2.5-flash` |
+| Hosting | **H2-phase2** — pack + LangGraph on local Docker compose; AgentCore on AWS (same day, torn down) |
 
-## Primary board (from research note)
+**Start here:** the full write-up — method, lane names, topology, results, and how to read them:
 
-| Lane | Task % | PI block % | Benign % | Mean embeds | Notes |
-|------|--------|------------|----------|-------------|--------|
-| **PC** pack + PrismAPI | **100** | **100** | **100** | **0.70** | Local Docker |
-| **PN** pack re-embed | **100** | **100** | **100** | 4.20 | Quality ties PC |
-| **L2** LangGraph | 92.5 | 85 | 100 | 4.20 | Same Postgres |
-| **A1** AgentCore+Guardrails+KB | **100** | **45** | 100 | — | AWS · PI soft cell |
+→ **[Pack vs LangGraph vs AWS Bedrock — Who Actually Wins?](race-e/RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md)**
 
-**Fair:** task · PI · benign · PC vs PN embeds · mean LLM among **local** lanes.  
-**Not fair:** latency vs AWS · “fewer LLM calls than Bedrock.”  
-**Disclose:** Race E strict grounding ~10% (weak cell) · PASS ≠ world-true.
-
-Pins: `chorusgraph==1.3.0` · `prismguard==0.1.10` · `prismshine==0.2.2`
+Machine appendix (raw lane tables): [`race-e/COMPARISON_REPORT.md`](race-e/COMPARISON_REPORT.md)
 
 ---
 
-## Links
+## Lane names (what PC / PN / L2 / A1 mean)
 
-| Asset | URL |
-|-------|-----|
-| Pack landing | https://www.insightits.com/products/prism-pack.html |
-| ChorusControl landing | https://www.insightits.com/products/choruscontrol.html |
-| Guardrail Scorecard (GRADE) | https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md |
-| This research note (GH) | [race-e/RESEARCH-NOTE-…](race-e/RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md) |
+| Code | Name in plain English | Stack |
+|------|----------------------|--------|
+| **PC** | **P**ack + shared embed (**C**lient dataplane) | PrismGuard → ChorusGraph → PrismShine + **PrismAPI** |
+| **PN** | **P**ack control (**N**o shared API — re-embed) | Same pack quality path; each worker re-embeds |
+| **L2** | **L**angGraph peer | LangGraph 1.2.4 + re-embed on the **same** Postgres |
+| **A1** | **A**WS peer mode **1** | Bedrock **AgentCore Runtime** + **Guardrails** + **KB** + Lambda tools + Gemini via Identity |
 
-Marketing source article: `Marketing/kb/articles/financepackbench/ARTICLE-3-pack-vs-langgraph-vs-agentcore-race-e.md`  
-LI/X paste pack: `LINKEDIN-X-POST-ARTICLE-3-RACE-E.md`
+Pins on the live run: `chorusgraph==1.3.0` · `prismguard==0.1.10` · `prismshine==0.2.2`
+
+**Pack wiring that matters:** Guard on ingress **before** cache/tools/LLM; Shine on egress with evidence. Mis-wiring collapses task % — this is a **systems** result, not a single-library microbench.
+
+---
+
+## Scoreboard (agent quality + PI)
+
+| Lane | Task % | PI block % | Benign allow % | Mean embeds | Mean LLM | Task P50 |
+|------|--------|------------|----------------|-------------|----------|----------|
+| **PC** | **100** | **100** | **100** | **0.70** | 0.60 | ~2.9 s *local* |
+| **PN** | **100** | **100** | **100** | 4.20 | 0.60 | ~2.9 s *local* |
+| **L2** | 92.5 | 85 | 100 | 4.20 | 1.12 | ~3.6 s *local* |
+| **A1** | **100** | **45** | 100 | — | n/a‡ | ~4.3 s *AWS* |
+
+‡ AgentCore’s harness LLM counter is **not comparable** — do not claim “fewer LLM calls than Bedrock.”
+
+**Fair to cite:** task · PI · benign · PC vs PN embed tax · mean LLM among **local** lanes.  
+**Not fair:** latency or $ vs AWS · “beat AWS overall.”  
+**Disclosed weak cell:** Race E **strict** grounding ~**10%** (PASS ≠ world-true).
+
+**PC vs PN:** quality tied at 100/100/100 — PrismAPI did **not** create the PI/task win; it cut embeds **0.70 vs 4.20** (~83%). Fleet fan-out: **20 vs 120** embeds (**6×**).
+
+---
+
+## Why this lives under ChorusControl
+
+ChorusControl is the self-hosted **ops / governance roof** for Guard · ChorusGraph · Shine · Cortex · related pack libs. Enterprise buyers look here for “does the stack we operate have honest proof?”  
+
+The Race E lanes are still **Pack vs LangGraph vs AgentCore** — not a claim that the ChorusControl UI was under test.
+
+| Product page | Soft ask |
+|--------------|----------|
+| [ChorusControl](https://www.insightits.com/products/choruscontrol.html) | **CONTROL** (enterprise access) |
+| [Prism Pack benchmarks](https://www.insightits.com/products/prism-pack.html) | Job-by-job site board |
+| [Guardrail Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) | Reply **GRADE** for PI on *your* prompts |
+
+No cold Calendly.
