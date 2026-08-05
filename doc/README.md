@@ -17,7 +17,7 @@
 | [Healthcare-Demo.md](./Healthcare-Demo.md) | Aurora Health demo walkthrough |
 | [PACKAGING.md](./PACKAGING.md) | Wheels / extras / containers |
 | [Side1-insightits-com-Handoff.md](./Side1-insightits-com-Handoff.md) | Website handoff (**other agent**) |
-| **[benchmarks/prism-pack/](./benchmarks/prism-pack/)** | **ChorusGraph Pack vs LangGraph Pack vs AWS Bedrock Pack** (Race E) — research note + COMPARISON_REPORT |
+| **[benchmarks/prism-pack/](./benchmarks/prism-pack/)** | **LangGraph Pack vs AWS Bedrock Pack vs ChorusGraph Pack** (Race E) — research note + COMPARISON_REPORT |
 
 **Product:** ChorusControl — AI Operations Platform (mother `[server]` + fleet `[agent]`).
 

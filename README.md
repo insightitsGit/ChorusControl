@@ -72,15 +72,15 @@ It is **not** an agent runtime (that’s [ChorusGraph](https://pypi.org/project/
 
 See [doc/INSTALL-MOTHER.md](doc/INSTALL-MOTHER.md) for profiles, pin tiers, and reference Docker.
 
-### ChorusGraph Pack vs LangGraph Pack vs AWS Bedrock Pack (Race E)
+### LangGraph Pack vs AWS Bedrock Pack vs ChorusGraph Pack (Race E)
 
 ChorusControl governs the **ChorusGraph / Prism Pack**. Job-by-job proof lives here:
 
 - **Index:** [doc/benchmarks/prism-pack/](doc/benchmarks/prism-pack/)  
-- **Research note:** [ChorusGraph Pack vs LangGraph Pack vs AWS Bedrock Pack](doc/benchmarks/prism-pack/race-e/RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md)  
+- **Research note:** [LangGraph Pack vs AWS Bedrock Pack vs ChorusGraph Pack](doc/benchmarks/prism-pack/race-e/RESEARCH-NOTE-pack-vs-langgraph-vs-aws-bedrock.md)  
 - **Machine report:** [`COMPARISON_REPORT.md`](doc/benchmarks/prism-pack/race-e/COMPARISON_REPORT.md) · run `general_v1_pcl2a_20260725` · seed 42  
 
-Measured lanes = **ChorusGraph Pack (PC/PN) / LangGraph Pack (L2) / Bedrock AgentCore Pack (A1)** — not the ChorusControl UI. Site: [prism-pack.html](https://www.insightits.com/products/prism-pack.html). Soft CTA: **CONTROL** (this product) · **GRADE** / [Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) for PI.
+Measured lanes = **LangGraph (L2) / Bedrock AgentCore (A1) / ChorusGraph Pack (PC/PN)** — not the ChorusControl UI. Site: [prism-pack.html](https://www.insightits.com/products/prism-pack.html). Soft CTA: **CONTROL** (this product) · **GRADE** / [Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) for PI.
 
 ---
 
