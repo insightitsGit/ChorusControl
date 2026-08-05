@@ -64,7 +64,7 @@ Each event records lane, suite, latency, LLM/embed counters (where instrumented)
 
 | Lane | Plain name | Stack under test |
 |------|------------|------------------|
-| **PC** | Pack + shared embed dataplane | **PrismGuard** → **ChorusGraph** → **PrismShine** + **PrismAPI** client · shared Postgres · Cortex sidecar present (**memory not scored**) |
+| **PC** | Pack + shared embed dataplane | **PrismGuard** → **ChorusGraph** → **PrismShine** + **PrismAPI** client · shared Postgres · **PrismCortex** sidecar present (**memory not scored** — health only) |
 | **PN** | Pack control (re-embed) | Same pack quality path · **no** PrismAPI — re-embeds per worker |
 | **L2** | LangGraph framework peer | **LangGraph** 1.2.4 + re-embed adapter on the **same** remote Postgres |
 | **A1** | AWS managed peer (mode 1) | Bedrock **AgentCore Runtime** + **Guardrails** + **Knowledge Base** (Aurora pgvector) + **Lambda** tools + Gemini via **AgentCore Identity** |

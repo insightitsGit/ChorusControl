@@ -3,6 +3,26 @@
 **Who this is for:** engineers comparing production agent stacks.  
 **Where you are:** [ChorusControl](https://github.com/insightitsGit/ChorusControl) docs — the ops plane that **governs** the Prism Pack. The numbers below measure the **pack** (and peers), not the ChorusControl dashboard UI.
 
+> **GitHub tip:** This folder’s file list only shows `README.md` + `race-e/`.  
+> **Open this README** (or the research note) for lane codes **PC / PN / L2 / A1** and product names. They are in the tables below — not as separate folder names.
+
+---
+
+## What’s in the Prism Pack (the names)
+
+These are the **pack libraries** (each is open source on its own). Race E wired them as a system:
+
+| Name | Job in the pack |
+|------|-----------------|
+| **PrismGuard** | Ingress / prompt-injection gate |
+| **ChorusGraph** | Agent runtime / orchestration |
+| **PrismShine** | Egress / grounding |
+| **PrismAPI** (prismlib-plus) | Shared embed dataplane (**PC** lane) |
+| **PrismCortex** | Agent memory sidecar on **PC** — **running / healthy**, memory quality **not scored** on Race E |
+| **ChorusControl** | Ops roof (this repo) — optional; not a Race E lane |
+
+Peers on the same board (not pack): **LangGraph** (**L2**) · **AWS Bedrock AgentCore + Guardrails + KB** (**A1**).
+
 ---
 
 ## What we did (Race E)
@@ -30,14 +50,14 @@ Machine appendix (raw lane tables): [`race-e/COMPARISON_REPORT.md`](race-e/COMPA
 
 | Code | Name in plain English | Stack |
 |------|----------------------|--------|
-| **PC** | **P**ack + shared embed (**C**lient dataplane) | PrismGuard → ChorusGraph → PrismShine + **PrismAPI** |
-| **PN** | **P**ack control (**N**o shared API — re-embed) | Same pack quality path; each worker re-embeds |
-| **L2** | **L**angGraph peer | LangGraph 1.2.4 + re-embed on the **same** Postgres |
+| **PC** | **P**ack + PrismAPI **C**lient dataplane | **PrismGuard** → **ChorusGraph** → **PrismShine** + **PrismAPI** + **PrismCortex** sidecar (health only) |
+| **PN** | **P**ack control (**N**o shared API — re-embed) | Same pack quality path (Guard → Graph → Shine); each worker re-embeds · no PrismAPI |
+| **L2** | **L**angGraph peer | **LangGraph** 1.2.4 + re-embed on the **same** Postgres |
 | **A1** | **A**WS peer mode **1** | Bedrock **AgentCore Runtime** + **Guardrails** + **KB** + Lambda tools + Gemini via Identity |
 
-Pins on the live run: `chorusgraph==1.3.0` · `prismguard==0.1.10` · `prismshine==0.2.2`
+Pins on the live run: `chorusgraph==1.3.0` · `prismguard==0.1.10` · `prismshine==0.2.2` · `prismcortex==0.3.0` · `prismlib-plus` (PrismAPI)
 
-**Pack wiring that matters:** Guard on ingress **before** cache/tools/LLM; Shine on egress with evidence. Mis-wiring collapses task % — this is a **systems** result, not a single-library microbench.
+**Pack wiring that matters:** Guard on ingress **before** cache/tools/LLM; Shine on egress with evidence. Mis-wiring collapses task %. Cortex was in compose on PC but **not** scored for memory quality — this is a **systems** task/PI + embed-tax result, not a Cortex memory win.
 
 ---
 
@@ -53,7 +73,7 @@ Pins on the live run: `chorusgraph==1.3.0` · `prismguard==0.1.10` · `prismshin
 ‡ AgentCore’s harness LLM counter is **not comparable** — do not claim “fewer LLM calls than Bedrock.”
 
 **Fair to cite:** task · PI · benign · PC vs PN embed tax · mean LLM among **local** lanes.  
-**Not fair:** latency or $ vs AWS · “beat AWS overall.”  
+**Not fair:** latency or $ vs AWS · “beat AWS overall” · “Cortex memory win.”  
 **Disclosed weak cell:** Race E **strict** grounding ~**10%** (PASS ≠ world-true).
 
 **PC vs PN:** quality tied at 100/100/100 — PrismAPI did **not** create the PI/task win; it cut embeds **0.70 vs 4.20** (~83%). Fleet fan-out: **20 vs 120** embeds (**6×**).
@@ -74,7 +94,7 @@ The Race E lanes are still **Pack vs LangGraph vs AgentCore** — not a claim th
 | **ChorusGraph** | Agent runtime / orchestration | [GitHub](https://github.com/insightitsGit/ChorusGraph) · [PyPI](https://pypi.org/project/chorusgraph/) · [vs LangGraph benches](https://github.com/insightitsGit/ChorusGraph/blob/master/docs/BENCHMARK_RESULTS.md) |
 | **PrismShine** | Egress / grounding | [GitHub](https://github.com/insightitsGit/PrismShine) · [PyPI](https://pypi.org/project/prismshine/) |
 | **PrismAPI** / PrismLib Plus | Shared embed dataplane (PC lane) | [GitHub](https://github.com/insightitsGit/prismlibplusapi) · [PyPI](https://pypi.org/project/prismlib-plus/) |
-| **PrismCortex** | Agent memory (sidecar on Race E = **health only**, not scored) | [GitHub](https://github.com/insightitsGit/PrismCortex) · [PyPI](https://pypi.org/project/prismcortex/) · **separate memory bench:** [RESULTS.md](https://github.com/insightitsGit/PrismCortex/blob/master/benchmarks/RESULTS.md) (gist vs log **~5.2×**) |
+| **PrismCortex** | Agent memory (PC sidecar = **health only** on Race E) | [GitHub](https://github.com/insightitsGit/PrismCortex) · [PyPI](https://pypi.org/project/prismcortex/) · **separate memory bench:** [RESULTS.md](https://github.com/insightitsGit/PrismCortex/blob/master/benchmarks/RESULTS.md) (gist vs log **~5.2×**) |
 | **ChorusControl** | Ops / governance roof (this repo) | [GitHub](https://github.com/insightitsGit/ChorusControl) · [landing](https://www.insightits.com/products/choruscontrol.html) |
 
 Pack family site board: [prism-pack.html](https://www.insightits.com/products/prism-pack.html)
