@@ -213,6 +213,21 @@ Follow-up hall-only run (`hall_onnx_judge_20260726`, n=30):
 4. Refuse blended P50 and refuse LLM-efficiency headlines vs Bedrock until the meter is honest.  
 5. Soft asks: **CONTROL** for [ChorusControl](https://www.insightits.com/products/choruscontrol.html) · **GRADE** / [Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) for PI on your prompts · no cold Calendly.
 
+### Open-source pack (use each lib alone)
+
+Each pack component is available as open source. ChorusControl is the optional ops roof.
+
+| Library | GitHub |
+|---------|--------|
+| PrismGuard | https://github.com/insightitsGit/PrismGuard |
+| ChorusGraph | https://github.com/insightitsGit/ChorusGraph |
+| PrismShine | https://github.com/insightitsGit/PrismShine |
+| PrismAPI / prismlib-plus | https://github.com/insightitsGit/prismlibplusapi |
+| PrismCortex (memory — **not scored** on Race E; see separate bench) | https://github.com/insightitsGit/PrismCortex · [benchmarks/RESULTS.md](https://github.com/insightitsGit/PrismCortex/blob/master/benchmarks/RESULTS.md) (~5.2× gist vs log) |
+| ChorusControl (this roof) | https://github.com/insightitsGit/ChorusControl |
+
+Pack site: https://www.insightits.com/products/prism-pack.html
+
 ---
 
 ## 8. Artifacts

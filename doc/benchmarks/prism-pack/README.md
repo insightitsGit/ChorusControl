@@ -62,14 +62,26 @@ Pins on the live run: `chorusgraph==1.3.0` · `prismguard==0.1.10` · `prismshin
 
 ## Why this lives under ChorusControl
 
-ChorusControl is the self-hosted **ops / governance roof** for Guard · ChorusGraph · Shine · Cortex · related pack libs. Enterprise buyers look here for “does the stack we operate have honest proof?”  
+ChorusControl is the self-hosted **ops / governance roof** for the Prism Pack. Enterprise buyers look here for “does the stack we operate have honest proof?”
 
 The Race E lanes are still **Pack vs LangGraph vs AgentCore** — not a claim that the ChorusControl UI was under test.
 
-| Product page | Soft ask |
-|--------------|----------|
-| [ChorusControl](https://www.insightits.com/products/choruscontrol.html) | **CONTROL** (enterprise access) |
-| [Prism Pack benchmarks](https://www.insightits.com/products/prism-pack.html) | Job-by-job site board |
-| [Guardrail Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) | Reply **GRADE** for PI on *your* prompts |
+**You can use every pack library open-source on its own** (pip + GitHub). ChorusControl is optional when you want the fleet ops plane on top.
+
+| Library | Role in the pack | Open source |
+|---------|------------------|---------------|
+| **PrismGuard** | Ingress / PI | [GitHub](https://github.com/insightitsGit/PrismGuard) · [PyPI](https://pypi.org/project/prismguard/) · [Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) |
+| **ChorusGraph** | Agent runtime / orchestration | [GitHub](https://github.com/insightitsGit/ChorusGraph) · [PyPI](https://pypi.org/project/chorusgraph/) · [vs LangGraph benches](https://github.com/insightitsGit/ChorusGraph/blob/master/docs/BENCHMARK_RESULTS.md) |
+| **PrismShine** | Egress / grounding | [GitHub](https://github.com/insightitsGit/PrismShine) · [PyPI](https://pypi.org/project/prismshine/) |
+| **PrismAPI** / PrismLib Plus | Shared embed dataplane (PC lane) | [GitHub](https://github.com/insightitsGit/prismlibplusapi) · [PyPI](https://pypi.org/project/prismlib-plus/) |
+| **PrismCortex** | Agent memory (sidecar on Race E = **health only**, not scored) | [GitHub](https://github.com/insightitsGit/PrismCortex) · [PyPI](https://pypi.org/project/prismcortex/) · **separate memory bench:** [RESULTS.md](https://github.com/insightitsGit/PrismCortex/blob/master/benchmarks/RESULTS.md) (gist vs log **~5.2×**) |
+| **ChorusControl** | Ops / governance roof (this repo) | [GitHub](https://github.com/insightitsGit/ChorusControl) · [landing](https://www.insightits.com/products/choruscontrol.html) |
+
+Pack family site board: [prism-pack.html](https://www.insightits.com/products/prism-pack.html)
+
+| Soft ask | Link |
+|----------|------|
+| Enterprise roof | **CONTROL** → [ChorusControl](https://www.insightits.com/products/choruscontrol.html) |
+| PI on *your* prompts | **GRADE** → [Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) |
 
 No cold Calendly.
