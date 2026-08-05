@@ -246,3 +246,9 @@ Pack site: https://www.insightits.com/products/prism-pack.html
 | Pack landing | https://www.insightits.com/products/prism-pack.html |
 | ChorusControl | https://www.insightits.com/products/choruscontrol.html |
 | Scorecard | https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md |
+
+---
+
+## More information
+
+For more information, visit our website: **[www.insightits.com](https://www.insightits.com)**

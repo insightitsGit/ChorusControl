@@ -113,3 +113,10 @@ Pack family site board: [prism-pack.html](https://www.insightits.com/products/pr
 | PI on *your* prompts | **GRADE** → [Scorecard](https://github.com/insightitsGit/PrismGuard/blob/main/docs/scorecard.md) |
 
 No cold Calendly.
+
+---
+
+## More information
+
+For more information, visit our website: **[www.insightits.com](https://www.insightits.com)**  
+Pack board: [prism-pack](https://www.insightits.com/products/prism-pack.html) · ChorusControl: [choruscontrol](https://www.insightits.com/products/choruscontrol.html)
