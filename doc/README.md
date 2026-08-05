@@ -17,6 +17,7 @@
 | [Healthcare-Demo.md](./Healthcare-Demo.md) | Aurora Health demo walkthrough |
 | [PACKAGING.md](./PACKAGING.md) | Wheels / extras / containers |
 | [Side1-insightits-com-Handoff.md](./Side1-insightits-com-Handoff.md) | Website handoff (**other agent**) |
+| **[benchmarks/prism-pack/](./benchmarks/prism-pack/)** | **Pack family Race E** — research note + COMPARISON_REPORT (Pack lanes; CC hosts/governs) |
 
 **Product:** ChorusControl — AI Operations Platform (mother `[server]` + fleet `[agent]`).
 
